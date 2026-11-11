@@ -1,5 +1,5 @@
 {
-  "updated": "2026-11-11T15:01:10.219Z",
+  "updated": "2026-11-11T15:04:41.448Z",
   "stages": [
     {
       "id": "stage1",
@@ -25,7 +25,21 @@
           "title": "Data Science",
           "instructor": "Rasha Abduallah",
           "sources": [],
-          "lectures": []
+          "lectures": [
+            {
+              "id": "lmwc92p60",
+              "title": "Sample",
+              "date": "2026-11-11",
+              "summary": "",
+              "video": "",
+              "files": [
+                {
+                  "label": "01.pdf",
+                  "url": "files/cs/stage3/001/mwc92mga-01.pdf"
+                }
+              ]
+            }
+          ]
         }
       ]
     },
