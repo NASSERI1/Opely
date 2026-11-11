@@ -7,13 +7,6 @@
       "department": "cs",
       "stage": "stage3",
       "owner": true
-    },
-    {
-      "key": "1b20f9c38a72e056cb07297d41620b2f06bc6bc1dfe55308fadcd34a9652a745",
-      "name": "Test test test",
-      "username": "test",
-      "department": "cs",
-      "stage": "stage1"
     }
   ]
 }
