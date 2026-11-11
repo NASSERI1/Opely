@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Admin | Opely</title>
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+<script src="lang.js"></script>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-inner">
+    <a class="home" href="#home">Opely Admin</a>
+    <a href="index.html">Student site</a>
+  </div>
+</header>
+<div class="wrap">
+<main>
+  <!-- Step 1: sign in (only needed once per device). The repository is found automatically. -->
+  <div id="signIn">
+    <h1>Admin</h1>
+    <p class="lead secondary">Manage your stage’s courses, lectures, sources, and announcements.</p>
+
+    <!-- Step 1: sign in with the token alone. The site knows who each token belongs to. -->
+    <form id="connectForm" class="card" novalidate>
+      <h2>Sign in</h2>
+      <p class="secondary small">Paste the access token the site owner gave you. It is saved in this browser only. Never share it.</p>
+      <div class="field">
+        <label for="token">Access token</label>
+        <input id="token" type="password" autocomplete="current-password">
+      </div>
+      <button class="primary" type="submit">Sign in</button>
+      <p id="connectStatus" class="status" role="status"></p>
+    </form>
+
+    <!-- Shown once, when no admin is registered yet: the owner registers themselves -->
+    <form id="setupForm" class="card" novalidate hidden>
+      <h2>Set up the owner</h2>
+      <p class="secondary small">No admins are registered yet. Register yourself as the owner. You can then add the other admins.</p>
+      <div class="field"><label for="ownerName">Full name</label><input id="ownerName" type="text" autocomplete="name" placeholder="First Father Grandfather">
+        <p class="hint">Your three-part name, in English. It is written next to every change you make.</p></div>
+      <div class="field"><label for="ownerUsername">Username</label><input id="ownerUsername" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"></div>
+      <div class="field"><label for="ownerDepartment">Department</label><select id="ownerDepartment"></select></div>
+      <div class="field"><label for="ownerStage">Stage</label><select id="ownerStage"></select></div>
+      <button class="primary" type="submit">Save and continue</button>
+      <p id="setupStatus" class="status" role="status"></p>
+    </form>
+
+    <!-- Preview: see the admin pages without a token -->
+    <div id="previewCard" class="card">
+      <h2>Preview</h2>
+      <p class="secondary small">Look around the admin pages without a token. Nothing is saved.</p>
+      <div class="field"><label for="department">Department</label><select id="department"></select></div>
+      <div class="field"><label for="adminStage">Stage</label><select id="adminStage"></select></div>
+      <button id="previewButton" class="primary" type="button">Look around</button>
+    </div>
+  </div>
+
+  <!-- Step 2: after signing in, every page is drawn inside "app" by the script below -->
+  <div id="session" hidden>
+    <div class="connected">
+      <span><span id="connectedLabel">Connected as</span> <strong id="connectedName"></strong><br>
+        <span id="connectedDetails" class="secondary small"></span></span>
+      <button id="changeButton" class="plain" type="button">Sign out</button>
+    </div>
+    <p id="previewNote" class="preview-note small" hidden>Preview mode. You can try everything, but nothing is saved or sent to GitHub. Reloading the page undoes your changes.</p>
+    <div id="app"></div>
+  </div>
+</main>
+</div>
+<p id="toast" class="toast" role="status" hidden></p>
+
+<script>
+/* =====================================================================
+   ADMIN PAGE
+   The look comes from style.css. The words come through lang.js: text
+   wrapped in t("...") is shown in the language of the admin's device.
+
+   Works like the student page: stages, then courses, then what is inside
+   a course. The difference is that every page can add, edit, or delete.
+   Changes are saved to the chosen department's content file (for example
+   data/cs.json) using the GitHub API directly from this browser.
+   There is no server.
+   ===================================================================== */
+translatePage(); // the words written in the HTML above
+const SETTINGS_KEY = "opely-admin";
+const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25 MB
+const $ = id => document.getElementById(id);
+
+let settings = null; // the signed-in admin: { name, username, department, stage, owner, token }
+let admins = [];     // everyone in admins.json
+
+// ---------- Where the site lives on GitHub ----------
+// The admin is never asked for the repository. On GitHub Pages the address
+// itself says where it is: https://OWNER.github.io/REPOSITORY/admin.html
+// Anywhere else (for example a custom domain, or your own computer), the
+// owner and repository written here are used.
+const OWNER = "";
+const REPOSITORY = "Opely";
+const BRANCH = "main";
+
+function repository() {
+  const host = location.hostname.toLowerCase();
+  if (!host.endsWith(".github.io")) {
+    if (!OWNER) throw new Error("This copy of the site isn’t on GitHub Pages. Write the repository owner’s username in the OWNER line of admin.html.");
+    return { owner: OWNER, name: REPOSITORY };
+  }
+  const parts = location.pathname.split("/").filter(Boolean);
+  if (parts.length && parts[parts.length - 1].includes(".")) parts.pop(); // drop "admin.html"
+  // A site at the top of OWNER.github.io lives in a repository with that same name
+  return { owner: host.replace(".github.io", ""), name: parts[0] || host };
+}
+let departments = []; // every department in catalog.json
+let dept = null;      // the department being worked on: { id, name, data }
+let data = null;      // the contents of that department's file
+
+// Preview mode: look around without a token. The department's content is read
+// from the site itself, and every change is kept in memory only.
+let preview = false;
+let previewData = null;
+
+// ---------- Small helpers ----------
+function setStatus(element, text, kind) {
+  element.textContent = t(text); // messages are written in English and shown in the admin's language
+  element.className = "status " + (kind || "");
+}
+
+function textToBase64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+  return btoa(binary);
+}
+
+function base64ToText(base64) {
+  const binary = atob(base64.replace(/\s/g, ""));
+  const bytes = Uint8Array.from(binary, character => character.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(",")[1] || "");
+    reader.onerror = () => reject(new Error(t("Couldn’t read {name}.", { name: file.name })));
+    reader.readAsDataURL(file);
+  });
+}
+
+// Turns "My Slides (1).pdf" into "my-slides-1.pdf" so it is safe in a link.
+// Letters and digits of any language are kept, so Arabic names survive.
+function safeName(name) {
+  const cleaned = name.toLowerCase()
+    .replace(/[^\p{L}\p{M}\p{N}.]+/gu, "-")   // anything else becomes a hyphen
+    .replace(/-+\./g, ".")                // no hyphen right before the dot
+    .replace(/^[-.]+|-+$/g, "");          // none at the start or the end
+  return cleaned || "file";
+}
+
+function isWebLink(text) { return /^https?:\/\//i.test(text); }
+
+function today() {
+  const now = new Date();
+  const two = number => String(number).padStart(2, "0");
+  return now.getFullYear() + "-" + two(now.getMonth() + 1) + "-" + two(now.getDate());
+}
+
+function emptyData() {
+  const colors = ["blue", "orange", "green", "purple"];
+  return { stages: colors.map((color, i) =>
+    ({ id: "stage" + (i + 1), name: "Stage " + (i + 1), color, courses: [] })) };
+}
+
+// ---------- Talking to GitHub ----------
+async function github(path, options) {
+  options = options || {};
+  const target = repository();
+  const response = await fetch(
+    "https://api.github.com/repos/" + target.owner + "/" + target.name + path, {
+      method: options.method || "GET",
+      cache: "no-store",
+      headers: {
+        "Accept": "application/vnd.github+json",
+        "Authorization": "Bearer " + settings.token,
+        "Content-Type": "application/json"
+      },
+      body: options.body ? JSON.stringify(options.body) : undefined
+    });
+  if (!response.ok) {
+    let detail = "";
+    try { detail = (await response.json()).message || ""; } catch (error) { /* no details */ }
+    const failure = new Error(detail || t("GitHub answered with error {n}.", { n: response.status }));
+    failure.status = response.status;
+    throw failure;
+  }
+  return response.json();
+}
+
+// Explains a GitHub error in plain words
+function explain(error) {
+  if (error.status === 401) return "GitHub rejected the token. Check it, or ask the site owner for a new one.";
+  if (error.status === 403) return "This token isn’t allowed to do that. It needs Contents set to “Read and write”.";
+  if (error.status === 404) return "Can’t find the site’s repository with this token. Check that the token was made for this repository.";
+  if (error.status === 409) return "The content changed while saving. Try again.";
+  if (error.status === 422) return t("GitHub refused the file:") + " " + error.message;
+  if (error instanceof TypeError) return "Can’t reach GitHub. Check your connection and try again.";
+  return error.message;
+}
+
+// Reads the newest content file of the chosen department. Returns its contents
+// and the "sha" GitHub needs when we save a new version on top of it.
+async function readData() {
+  if (preview) {
+    if (!previewData) {
+      const response = await fetch(dept.data, { cache: "no-store" });
+      previewData = response.ok ? await response.json() : emptyData();
+    }
+    return { data: JSON.parse(JSON.stringify(previewData)), sha: null }; // a copy, like a fresh read
+  }
+  try {
+    const file = await github("/contents/" + dept.data + "?ref=" + encodeURIComponent(BRANCH));
+    return { data: JSON.parse(base64ToText(file.content)), sha: file.sha };
+  } catch (error) {
+    if (error.status === 404) return { data: emptyData(), sha: null }; // first upload ever
+    throw error;
+  }
+}
+
+// Adds the admin's name to the note GitHub keeps with every change,
+// so the repository's history shows who did what
+function signed(message) {
+  return settings.name ? message + " (by " + settings.name + ")" : message;
+}
+
+function writeData(newData, sha, message) {
+  if (preview) { previewData = newData; return Promise.resolve(); } // kept in memory only
+  const body = {
+    message: signed(message),
+    content: textToBase64(JSON.stringify(newData, null, 2) + "\n"),
+    branch: BRANCH
+  };
+  if (sha) body.sha = sha;
+  return github("/contents/" + dept.data, { method: "PUT", body: body });
+}
+
+async function uploadFile(file, path) {
+  if (preview) return; // nothing is sent in preview mode
+  await github("/contents/" + encodeURI(path), {
+    method: "PUT",
+    body: { message: signed("Add " + file.name), content: await fileToBase64(file), branch: BRANCH }
+  });
+}
+
+// ---------- Departments ----------
+// catalog.json (next to this page) lists the departments, grouped by university
+// and faculty. To support a new department, faculty, or university, add it to
+// catalog.json. Its content file is created by the first upload.
+let faculties = []; // every faculty, each with its departments
+
+async function loadCatalog() {
+  const response = await fetch("catalog.json", { cache: "no-store" });
+  if (!response.ok) throw new Error("Can’t load catalog.json. It belongs next to this page.");
+  const catalog = await response.json();
+  faculties = [];
+  departments = [];
+  (catalog.universities || []).forEach(university => (university.faculties || []).forEach(faculty => {
+    faculties.push({ name: localName(faculty), departments: faculty.departments || [] });
+    (faculty.departments || []).forEach(department => departments.push(department));
+  }));
+  if (departments.length === 0) throw new Error("catalog.json has no departments yet.");
+}
+
+// Fills a Department list, with one group per faculty
+function fillDepartments(select) {
+  select.innerHTML = "";
+  faculties.forEach(faculty => {
+    const group = document.createElement("optgroup");
+    group.label = faculty.name;
+    faculty.departments.forEach(department => group.append(new Option(localName(department), department.id)));
+    select.append(group);
+  });
+}
+
+// Fills a Stage list with the stages of the department chosen in `departmentSelect`
+async function fillStages(departmentSelect, stageSelect, keep) {
+  const department = departments.find(d => d.id === departmentSelect.value);
+  let stages = emptyData().stages;
+  try {
+    const response = await fetch(department.data, { cache: "no-store" });
+    if (response.ok) stages = (await response.json()).stages || stages;
+  } catch (error) { /* offline: offer the usual four stages */ }
+  stageSelect.innerHTML = "";
+  stages.forEach(stage => stageSelect.add(new Option(stageName(stage), stage.id)));
+  if (keep !== undefined) stageSelect.value = keep;
+  if (stageSelect.selectedIndex === -1) stageSelect.selectedIndex = 0;
+  stylePickers();
+}
+
+// A Department list and the Stage list that follows it
+async function linkPickers(departmentSelect, stageSelect) {
+  fillDepartments(departmentSelect);
+  departmentSelect.addEventListener("change", () => fillStages(departmentSelect, stageSelect));
+  await fillStages(departmentSelect, stageSelect);
+}
+
+// The stage this admin looks after
+function ownStage() {
+  return data.stages.find(stage => stage.id === settings.stage);
+}
+
+// A three-part name written in English letters
+function isFullName(name) {
+  return /^[A-Za-z][A-Za-z'.-]*(\s+[A-Za-z][A-Za-z'.-]*){2,}$/.test(name);
+}
+
+// ---------- Helpers for courses, deleting, and files ----------
+// Makes an id like "cs101" from a course code like "CS 101"
+function makeCourseId(code, stage) {
+  let id = code.toLowerCase().replace(/[^a-z0-9]/g, "") || "course";
+  if (id === "sem1" || id === "sem2") id = "c" + id; // these words are used in page addresses
+  let unique = id;
+  let n = 2;
+  while (stage.courses.some(course => course.id === unique)) { unique = id + "x" + n; n += 1; }
+  return unique;
+}
+
+// Deleting needs two taps: the first changes the button's text, the second deletes
+function confirmThen(button, action) {
+  if (button.dataset.armed) {
+    delete button.dataset.armed;
+    button.textContent = button.dataset.label;
+    return action();
+  }
+  button.dataset.armed = "yes";
+  button.dataset.label = button.textContent;
+  button.textContent = t("Tap again to delete");
+  setTimeout(() => {
+    if (!button.dataset.armed) return;
+    delete button.dataset.armed;
+    button.textContent = button.dataset.label;
+  }, 4000);
+}
+
+// The files of these entries that are stored in the repository (not outside links).
+// Only paths inside the "files" folder are ever deleted.
+function repoFiles(entries) {
+  return entries.map(entry => entry.url).filter(url => url && url.startsWith("files/"));
+}
+
+// Deletes files from the repository. Returns how many could not be deleted.
+async function deleteFiles(paths) {
+  if (preview) return 0; // nothing is removed in preview mode
+  let failed = 0;
+  for (let i = 0; i < paths.length; i += 1) {
+    say(t("Removing file {i} of {n}…", { i: i + 1, n: paths.length }), "busy");
+    try {
+      // GitHub needs the file's "sha" before it lets us delete it
+      const file = await github("/contents/" + encodeURI(paths[i]) + "?ref=" + encodeURIComponent(BRANCH));
+      await github("/contents/" + encodeURI(paths[i]), {
+        method: "DELETE",
+        body: { message: signed("Remove " + paths[i]), sha: file.sha, branch: BRANCH }
+      });
+    } catch (error) {
+      if (error.status !== 404) failed += 1; // 404 means it is already gone
+    }
+  }
+  return failed;
+}
+
+// ---------- The list of admins ----------
+// admins.json (next to this page) says who each token belongs to: a name, a
+// username, a department, and a stage. The token itself is never stored.
+// Only its "fingerprint" is: a scrambled form that can't be turned back
+// into the token, so the file is safe to keep in a public repository.
+async function fingerprint(token) {
+  if (!window.crypto || !crypto.subtle) {
+    throw new Error("Signing in needs a secure address. Open the site with https, or at localhost.");
+  }
+  const scrambled = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+  return Array.from(new Uint8Array(scrambled)).map(byte => byte.toString(16).padStart(2, "0")).join("");
+}
+
+// Reads the newest admins.json. Returns the list and the "sha" needed to save over it.
+async function readAdmins() {
+  try {
+    const file = await github("/contents/admins.json?ref=" + encodeURIComponent(BRANCH));
+    return { list: JSON.parse(base64ToText(file.content)).admins || [], sha: file.sha };
+  } catch (error) {
+    if (error.status === 404) return { list: [], sha: null }; // nobody is registered yet
+    throw error;
+  }
+}
+
+function writeAdmins(list, sha, message) {
+  const body = {
+    message: signed(message),
+    content: textToBase64(JSON.stringify({ admins: list }, null, 2) + "\n"),
+    branch: BRANCH
+  };
+  if (sha) body.sha = sha;
+  return github("/contents/admins.json", { method: "PUT", body: body });
+}
+
+function departmentName(id) {
+  const department = departments.find(d => d.id === id);
+  return department ? localName(department) : id;
+}
+
+// ---------- Drop-down lists, drawn in our own design ----------
+// A browser draws an open <select> in its own style, and that can't be changed.
+// So every <select> is hidden and gets a "picker" next to it: a button that
+// opens a list we draw ourselves. The <select> stays in the page and still
+// holds the value, so the rest of the code keeps using it as before.
+function stylePickers() {
+  document.querySelectorAll("select").forEach(select => {
+    let picker = select.nextElementSibling;
+    if (!picker || !picker.classList.contains("picker")) picker = makePicker(select);
+    picker.querySelector("span").textContent = select.selectedOptions[0] ? select.selectedOptions[0].textContent : "";
+  });
+}
+
+function makePicker(select) {
+  const picker = document.createElement("div");
+  picker.className = "picker";
+  picker.innerHTML = `<button class="picker-button" type="button" aria-haspopup="listbox" aria-expanded="false"><span></span></button>
+    <ul class="picker-list" role="listbox" hidden></ul>`;
+  const button = picker.querySelector("button");
+  const list = picker.querySelector("ul");
+  select.hidden = true;
+  select.after(picker);
+
+  // The field's label now points at the button
+  const label = document.querySelector('label[for="' + select.id + '"]');
+  button.id = select.id + "Button";
+  if (label) label.htmlFor = button.id;
+
+  function close(focusButton) {
+    list.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    if (focusButton) button.focus();
+  }
+
+  function choose(value) {
+    select.value = value;
+    select.dispatchEvent(new Event("change")); // tells the rest of the page, like a real choice
+    stylePickers();
+    close(true);
+  }
+
+  // Draws the rows from the select's options each time the list opens
+  function open() {
+    closePickers();
+    list.innerHTML = "";
+    const addOption = option => {
+      const row = document.createElement("li");
+      row.className = "option";
+      row.setAttribute("role", "option");
+      row.setAttribute("aria-selected", option.selected ? "true" : "false");
+      row.tabIndex = -1;
+      row.textContent = option.textContent;
+      row.addEventListener("click", () => choose(option.value));
+      list.append(row);
+    };
+    Array.from(select.children).forEach(child => {
+      if (child.tagName !== "OPTGROUP") return addOption(child);
+      const heading = document.createElement("li"); // the name of a group of options
+      heading.className = "heading";
+      heading.textContent = child.label;
+      list.append(heading);
+      Array.from(child.children).forEach(addOption);
+    });
+    list.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    const chosen = list.querySelector('[aria-selected="true"]') || list.querySelector(".option");
+    if (chosen) chosen.focus();
+  }
+
+  button.addEventListener("click", () => (list.hidden ? open() : close(false)));
+
+  // Keyboard: arrows move, Enter or Space chooses, Escape closes
+  list.addEventListener("keydown", event => {
+    const rows = Array.from(list.querySelectorAll(".option"));
+    const at = rows.indexOf(document.activeElement);
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const next = rows[at + (event.key === "ArrowDown" ? 1 : -1)];
+      if (next) next.focus();
+    } else if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      if (rows[at]) rows[at].click();
+    } else if (event.key === "Escape" || event.key === "Tab") {
+      event.preventDefault();
+      close(true);
+    }
+  });
+  return picker;
+}
+
+// Closes every open list. A tap anywhere outside a picker does this.
+function closePickers() {
+  document.querySelectorAll(".picker-list:not([hidden])").forEach(list => {
+    list.hidden = true;
+    list.previousElementSibling.setAttribute("aria-expanded", "false");
+  });
+}
+document.addEventListener("click", event => { if (!event.target.closest(".picker")) closePickers(); });
+
+// ---------- Small helpers for drawing pages ----------
+const app = $("app");
+
+// Makes text safe to place inside HTML
+function esc(text) {
+  return String(text == null ? "" : text)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// The text typed into a field, without spaces at the ends
+function typed(id) { return $(id).value.trim(); }
+
+// Shows a short message at the bottom of the screen.
+// kind: "busy" stays until the next message, "done" fades by itself, "error" stays until tapped.
+let toastTimer = null;
+function say(text, kind) {
+  const toast = $("toast");
+  clearTimeout(toastTimer);
+  toast.textContent = t(text);
+  toast.className = "toast " + (kind || "");
+  toast.hidden = !text;
+  if (kind === "done") toastTimer = setTimeout(() => { toast.hidden = true; }, 4000);
+}
+$("toast").addEventListener("click", () => { $("toast").hidden = true; });
+
+// Turns every button and field on the page off while something is being saved
+function setBusy(busy) {
+  app.querySelectorAll("button, input, select, textarea").forEach(control => { control.disabled = busy; });
+}
+
+// Goes to another page. If we are already there, draws it again.
+function go(address) {
+  if (location.hash === address) route();
+  else location.hash = address;
+}
+
+// Connects the Delete buttons on the page (the ones with a data-key) to an action.
+// The action receives the button's key.
+function onDelete(action) {
+  app.querySelectorAll("button[data-key]").forEach(button =>
+    button.addEventListener("click", () => confirmThen(button, () => action(button.dataset.key))));
+}
+
+// Connects the form on the page to an action
+function onSubmit(action) {
+  app.querySelector("form").addEventListener("submit", event => {
+    event.preventDefault();
+    action();
+  });
+}
+
+// ---------- Saving ----------
+// Reads the newest file of the department, lets `edit` change it, and saves it.
+// `edit` may return a list of file paths to delete from the repository afterwards.
+// Returns true if the change was saved.
+async function save(message, edit, doneText) {
+  setBusy(true);
+  say("Saving…", "busy");
+  try {
+    const fresh = await readData();
+    const filesToDelete = edit(fresh.data) || [];
+    fresh.data.updated = new Date().toISOString();
+    await writeData(fresh.data, fresh.sha, message);
+    data = fresh.data;
+
+    // The site no longer links to these files, so now they can be removed
+    const failed = await deleteFiles(filesToDelete);
+    if (failed) say(t("Saved, but {n} file(s) could not be removed from the repository.", { n: failed }), "error");
+    else if (preview) say("Preview only. Nothing was saved.", "done");
+    else say(t(doneText || "Saved.") + " " + t("Students will see it in a minute or two."), "done");
+    return true;
+  } catch (error) {
+    say(explain(error), "error");
+    return false;
+  } finally {
+    setBusy(false);
+  }
+}
+
+// Finds a stage or a course in a copy of the data. Stops with a message if it is gone.
+function findStage(inData, stageId) {
+  const stage = inData.stages.find(s => s.id === stageId);
+  if (!stage) throw new Error("That stage no longer exists. Reload the page.");
+  return stage;
+}
+function findCourse(inData, stageId, courseId) {
+  const course = findStage(inData, stageId).courses.find(c => c.id === courseId);
+  if (!course) throw new Error("That course no longer exists. Reload the page.");
+  return course;
+}
+
+// Uploads the chosen files into the course's folder. Returns them as { label, url } entries.
+async function uploadAll(files, stage, course) {
+  const uploaded = [];
+  for (let i = 0; i < files.length; i += 1) {
+    say(t("Uploading file {i} of {n}…", { i: i + 1, n: files.length }), "busy");
+    const path = "files/" + dept.id + "/" + stage.id + "/" + course.id + "/" + Date.now().toString(36) + "-" + safeName(files[i].name);
+    await uploadFile(files[i], path);
+    uploaded.push({ label: files[i].name, url: path });
+  }
+  return uploaded;
+}
+
+function tooBig(files) {
+  const file = files.find(f => f.size > MAX_FILE_SIZE);
+  return file ? t("{name} is larger than 25 MB. Share it as a link instead.", { name: file.name }) : "";
+}
+
+// ---------- The admin's stage: its announcements, then pick a semester and a course ----------
+function showStage(stage, semester) {
+  document.title = stageName(stage) + " | " + t("Admin");
+  const base = "#" + stage.id;
+  const news = (data.announcements || []).filter(item => item.stage === stage.id);
+  const segments = [1, 2].map(number => `
+    <a class="segment" href="${base}-sem${number}" ${number === semester ? 'aria-current="page"' : ""}>${t("Semester {n}", { n: number })}</a>`).join("");
+
+  const courses = stage.courses
+    .filter(course => course.semester === semester)
+    .sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true }));
+
+  const courseWidgets = courses.map(course => `
+    <a class="widget course ${esc(stage.color)}" href="${base}-${course.id}">
+      <span class="top">
+        <span class="pill">${esc(course.code)}</span>
+        <span class="secondary small">${plural(course.lectures.length, "lecture")}</span>
+      </span>
+      <span>
+        <span class="title">${esc(course.title)}</span><br>
+        <span class="secondary small">${esc(course.instructor)}</span>
+      </span>
+      <span class="secondary small">${plural((course.sources || []).length, "source")}</span>
+    </a>`).join("");
+
+  app.innerHTML = `
+    <h1>${esc(stageName(stage))}</h1>
+    <p class="lead secondary">${esc(localName(dept))}</p>
+    <div class="widgets">
+        <a class="widget wide" href="#news">
+          <span class="kicker">${t("Announcements")}</span>
+          <span>
+            <span class="title">${news.length ? esc(news[0].title) : t("No announcements yet")}</span><br>
+            <span class="secondary small">${news.length ? plural(news.length, "announcement") + ". " : ""}${t("Post or remove")}</span>
+          </span>
+        </a>
+        ${settings.owner ? `<a class="widget wide" href="#admins">
+          <span class="kicker">${t("Admins")}</span>
+          <span>
+            <span class="title">${plural(admins.length, "admin")}</span><br>
+            <span class="secondary small">${t("Add or remove")}</span>
+          </span>
+        </a>` : ""}
+    </div>
+    <nav class="segments" aria-label="${t("Semester")}">${segments}</nav>
+    <p class="count small secondary">${plural(courses.length, "course")}</p>
+    <div class="courses">
+      ${courseWidgets}
+      <a class="widget course add" href="${base}-sem${semester}-add">
+        <span class="plus">+</span>
+        <span class="title">${t("Add course")}</span>
+      </a>
+    </div>`;
+}
+
+// ---------- New course ----------
+function showAddCourse(stage, semester) {
+  document.title = localTitle("New course | Admin");
+  app.innerHTML = `
+    <a class="back" href="#${stage.id}-sem${semester}">${esc(stageName(stage))}${SEP}${t("Semester {n}", { n: semester })}</a>
+    <h1>${t("New course")}</h1>
+    <form class="card" novalidate>
+      <div class="two">
+        <div class="field"><label for="courseCode">${t("Course code")}</label><input id="courseCode" type="text" placeholder="CS 101" autocomplete="off"></div>
+        <div class="field"><label for="courseLecturer">${t("Lecturer")}</label><input id="courseLecturer" type="text" autocomplete="off"></div>
+      </div>
+      <div class="field"><label for="courseTitle">${t("Course title")}</label><input id="courseTitle" type="text" autocomplete="off"></div>
+      <button class="primary" type="submit">${t("Add course")}</button>
+    </form>`;
+
+  onSubmit(async () => {
+    const code = typed("courseCode");
+    const title = typed("courseTitle");
+    const lecturer = typed("courseLecturer");
+    if (!code || !title) return say("Enter the course’s code and title.", "error");
+
+    let newId;
+    const saved = await save("Add course: " + code, fresh => {
+      const freshStage = findStage(fresh, stage.id);
+      newId = makeCourseId(code, freshStage);
+      freshStage.courses.push({ id: newId, code: code, semester: semester, title: title, instructor: lecturer, sources: [], lectures: [] });
+    }, "Course added.");
+    if (saved) go("#" + stage.id + "-" + newId); // open the new course, ready for its first lecture
+  });
+}
+
+// ---------- A course: its lectures, its sources, and its details ----------
+function showCourse(stage, course, tab) {
+  document.title = course.title + " | " + t("Admin");
+  const base = "#" + stage.id + "-" + course.id;
+  const sources = course.sources || [];
+
+  let body;
+  if (tab === "sources") {
+    const rows = sources.map((source, i) => `
+      <li><span class="row">
+        <span class="grow">${esc(source.label)}<br>
+          <span class="secondary small">${t(!source.url ? "Not added yet" : isWebLink(source.url) ? "Link" : "File")}</span></span>
+        <button class="delete" type="button" data-key="${i}">${t("Delete")}</button>
+      </span></li>`).join("");
+    body = `
+      <a class="button" href="${base}-sources-add">${t("Add source")}</a>
+      ${sources.length
+        ? `<p class="count small secondary">${plural(sources.length, "source")}</p><ul class="group">${rows}</ul>`
+        : `<p class="text-block secondary empty">${t("No sources yet.")}</p>`}`;
+  } else if (tab === "details") {
+    body = `
+      <form class="card" novalidate>
+        <div class="two">
+          <div class="field"><label for="courseCode">${t("Course code")}</label><input id="courseCode" type="text" autocomplete="off" value="${esc(course.code)}"></div>
+          <div class="field"><label for="courseLecturer">${t("Lecturer")}</label><input id="courseLecturer" type="text" autocomplete="off" value="${esc(course.instructor)}"></div>
+        </div>
+        <div class="field"><label for="courseTitle">${t("Course title")}</label><input id="courseTitle" type="text" autocomplete="off" value="${esc(course.title)}"></div>
+        <button class="primary" type="submit">${t("Save changes")}</button>
+      </form>
+      <button class="danger" type="button" data-key="course">${t("Delete course")}</button>`;
+  } else {
+    const rows = course.lectures.map((lecture, i) => `
+      <li><span class="row">
+        <span class="num">${i + 1}</span>
+        <span class="grow">${esc(lecture.title)}<br>
+          <span class="secondary small">${niceDate(lecture.date)}${SEP}${plural((lecture.files || []).length, "file")}</span></span>
+        <button class="delete" type="button" data-key="${i}">${t("Delete")}</button>
+      </span></li>`).join("");
+    body = `
+      <a class="button" href="${base}-add">${t("Add lecture")}</a>
+      ${course.lectures.length
+        ? `<p class="count small secondary">${plural(course.lectures.length, "lecture")}</p><ol class="group">${rows}</ol>`
+        : `<p class="text-block secondary empty">${t("No lectures yet.")}</p>`}`;
+  }
+
+  const current = name => (tab === name ? 'aria-current="page"' : "");
+  app.innerHTML = `
+    <a class="back" href="#${stage.id}-sem${course.semester}">${esc(stageName(stage))}${SEP}${t("Semester {n}", { n: course.semester })}</a>
+    <div class="course-head ${esc(stage.color)}">
+      <span class="pill">${esc(course.code)}</span>
+      <h1>${esc(course.title)}</h1>
+      <p class="secondary">${esc(course.instructor)}</p>
+    </div>
+    <nav class="segments three" aria-label="${t("Course")}">
+      <a class="segment" href="${base}" ${current("lectures")}>${t("Lectures")}</a>
+      <a class="segment" href="${base}-sources" ${current("sources")}>${t("Sources")}</a>
+      <a class="segment" href="${base}-details" ${current("details")}>${t("Details")}</a>
+    </nav>
+    ${body}`;
+
+  if (tab === "lectures") {
+    onDelete(async key => {
+      const lecture = course.lectures[Number(key)];
+      const saved = await save("Delete lecture: " + lecture.title, fresh => {
+        const list = findCourse(fresh, stage.id, course.id).lectures;
+        const i = list.findIndex(other => lecture.id ? other.id === lecture.id : other.title === lecture.title && other.date === lecture.date);
+        if (i === -1) throw new Error("That lecture is already gone. Reload the page.");
+        return repoFiles(list.splice(i, 1)[0].files || []);
+      }, "Lecture deleted.");
+      if (saved) route(true);
+    });
+  }
+
+  if (tab === "sources") {
+    onDelete(async key => {
+      const source = sources[Number(key)];
+      const saved = await save("Delete source: " + source.label, fresh => {
+        const list = findCourse(fresh, stage.id, course.id).sources || [];
+        const i = list.findIndex(other => other.label === source.label && other.url === source.url);
+        if (i === -1) throw new Error("That source is already gone. Reload the page.");
+        return repoFiles(list.splice(i, 1));
+      }, "Source deleted.");
+      if (saved) route(true);
+    });
+  }
+
+  if (tab === "details") {
+    onSubmit(async () => {
+      const code = typed("courseCode");
+      const title = typed("courseTitle");
+      const lecturer = typed("courseLecturer");
+      if (!code || !title) return say("Enter the course’s code and title.", "error");
+      // The course id stays the same, so links to the course keep working
+      const saved = await save("Edit course: " + code, fresh => {
+        const freshCourse = findCourse(fresh, stage.id, course.id);
+        freshCourse.code = code;
+        freshCourse.title = title;
+        freshCourse.instructor = lecturer;
+      });
+      if (saved) route(true);
+    });
+    onDelete(async () => {
+      const saved = await save("Delete course: " + course.code, fresh => {
+        const freshStage = findStage(fresh, stage.id);
+        const freshCourse = findCourse(fresh, stage.id, course.id);
+        freshStage.courses.splice(freshStage.courses.indexOf(freshCourse), 1);
+        const entries = (freshCourse.sources || []).slice();
+        freshCourse.lectures.forEach(lecture => entries.push(...(lecture.files || [])));
+        return repoFiles(entries);
+      }, "Course deleted.");
+      if (saved) go("#" + stage.id + "-sem" + course.semester);
+    });
+  }
+}
+
+// ---------- New lecture ----------
+function showAddLecture(stage, course) {
+  document.title = localTitle("New lecture | Admin");
+  const back = "#" + stage.id + "-" + course.id;
+  app.innerHTML = `
+    <a class="back" href="${back}">${esc(course.title)}</a>
+    <h1>${t("New lecture")}</h1>
+    <form class="card" novalidate>
+      <div class="field"><label for="lectureTitle">${t("Lecture title")}</label><input id="lectureTitle" type="text" autocomplete="off"></div>
+      <div class="field"><label for="lectureDate">${t("Date")}</label><input id="lectureDate" type="date" value="${today()}"></div>
+      <div class="field"><label for="lectureFiles">${t("Files")}</label><input id="lectureFiles" type="file" multiple>
+        <p class="hint">${t("Slides, notes, or PDFs. Up to 25 MB each.")}</p></div>
+      <div class="field"><label for="lectureVideo">${t("Recording link (optional)")}</label><input id="lectureVideo" type="url" placeholder="https://youtube.com/…" autocomplete="off"></div>
+      <div class="field"><label for="lectureSummary">${t("Summary (optional)")}</label><textarea id="lectureSummary"></textarea></div>
+      <button class="primary" type="submit">${t("Upload")}</button>
+    </form>`;
+
+  onSubmit(async () => {
+    const title = typed("lectureTitle");
+    const date = $("lectureDate").value;
+    const video = typed("lectureVideo");
+    const summary = typed("lectureSummary");
+    const files = Array.from($("lectureFiles").files);
+    if (!title) return say("Enter the lecture title.", "error");
+    if (!date) return say("Choose the lecture date.", "error");
+    if (video && !isWebLink(video)) return say("The link must start with https://", "error");
+    if (tooBig(files)) return say(tooBig(files), "error");
+
+    setBusy(true);
+    let uploaded;
+    try {
+      uploaded = await uploadAll(files, stage, course); // 1. the files
+    } catch (error) {
+      setBusy(false);
+      return say(explain(error), "error");
+    }
+    const saved = await save("Add lecture: " + title, fresh => { // 2. the lecture itself
+      const lectures = findCourse(fresh, stage.id, course.id).lectures;
+      lectures.push({
+        id: "l" + Date.now().toString(36), // never changes, so links to this lecture keep working
+        title: title, date: date, summary: summary, video: video, files: uploaded
+      });
+      lectures.sort((a, b) => a.date.localeCompare(b.date)); // oldest first
+    }, "Uploaded.");
+    if (saved) go(back);
+  });
+}
+
+// ---------- New source ----------
+function showAddSource(stage, course) {
+  document.title = localTitle("New source | Admin");
+  const back = "#" + stage.id + "-" + course.id + "-sources";
+  app.innerHTML = `
+    <a class="back" href="${back}">${esc(course.title)}</a>
+    <h1>${t("New source")}</h1>
+    <form class="card" novalidate>
+      <div class="field"><label for="sourceLabel">${t("Source name")}</label><input id="sourceLabel" type="text" placeholder="${t("Course textbook")}" autocomplete="off"></div>
+      <div class="field"><label for="sourceFile">${t("File")}</label><input id="sourceFile" type="file">
+        <p class="hint">${t("Up to 25 MB. Or use a link instead.")}</p></div>
+      <div class="field"><label for="sourceLink">${t("Link")}</label><input id="sourceLink" type="url" placeholder="https://…" autocomplete="off"></div>
+      <button class="primary" type="submit">${t("Upload")}</button>
+    </form>`;
+
+  onSubmit(async () => {
+    const label = typed("sourceLabel");
+    const link = typed("sourceLink");
+    const files = Array.from($("sourceFile").files);
+    if (!label) return say("Enter the source name.", "error");
+    if (files.length === 0 && !link) return say("Add a file or a link for the source.", "error");
+    if (link && !isWebLink(link)) return say("The link must start with https://", "error");
+    if (tooBig(files)) return say(tooBig(files), "error");
+
+    setBusy(true);
+    let uploaded;
+    try {
+      uploaded = await uploadAll(files, stage, course);
+    } catch (error) {
+      setBusy(false);
+      return say(explain(error), "error");
+    }
+    const saved = await save("Add source: " + label, fresh => {
+      const freshCourse = findCourse(fresh, stage.id, course.id);
+      freshCourse.sources = freshCourse.sources || [];
+      uploaded.forEach(file => freshCourse.sources.push({ label: label, url: file.url }));
+      if (link) freshCourse.sources.push({ label: label, url: link });
+    }, "Uploaded.");
+    if (saved) go(back);
+  });
+}
+
+// ---------- Announcements: post a new one, or delete an old one ----------
+function showNews() {
+  document.title = localTitle("Announcements | Admin");
+  const own = ownStage();
+  const news = (data.announcements || []).filter(item => item.stage === own.id); // only this stage's
+  const rows = news.map((item, i) => `
+    <li><span class="row">
+      <span class="grow">${esc(item.title)}<br>
+        <span class="secondary small">${niceDate(item.date)}</span></span>
+      <button class="delete" type="button" data-key="${i}">${t("Delete")}</button>
+    </span></li>`).join("");
+
+  app.innerHTML = `
+    <a class="back" href="#home">${esc(stageName(own))}</a>
+    <h1>${t("Announcements")}</h1>
+    <p class="lead secondary">${esc(t("Students of {stage} see these.", { stage: stageName(own) }))}</p>
+    <form class="card" novalidate>
+      <div class="field"><label for="newsTitle">${t("Title")}</label><input id="newsTitle" type="text" placeholder="${t("Midterm exam dates")}" autocomplete="off"></div>
+      <div class="field"><label for="newsText">${t("Message")}</label><textarea id="newsText"></textarea></div>
+      <button class="primary" type="submit">${t("Post announcement")}</button>
+    </form>
+    <h2>${t("Posted")}</h2>
+    ${news.length ? `<ul class="group">${rows}</ul>` : `<p class="text-block secondary">${t("No announcements yet.")}</p>`}`;
+
+  onSubmit(async () => {
+    const title = typed("newsTitle");
+    const text = typed("newsText");
+    if (!title) return say("Enter the announcement’s title.", "error");
+    const saved = await save("Add announcement: " + title, fresh => {
+      fresh.announcements = fresh.announcements || [];
+      fresh.announcements.unshift({ id: "n" + Date.now().toString(36), title: title, text: text, date: today(), stage: own.id });
+    }, "Posted.");
+    if (saved) route(true);
+  });
+
+  onDelete(async key => {
+    const item = news[Number(key)];
+    const saved = await save("Delete announcement: " + item.title, fresh => {
+      const list = fresh.announcements || [];
+      const i = list.findIndex(other => item.id ? other.id === item.id : other.title === item.title && other.date === item.date);
+      if (i === -1) throw new Error("That announcement is already gone. Reload the page.");
+      list.splice(i, 1);
+    }, "Announcement deleted.");
+    if (saved) route(true);
+  });
+}
+
+// ---------- Admins (owner only): register a token for someone, or remove them ----------
+function showAdmins() {
+  document.title = localTitle("Admins | Admin");
+  const rows = admins.map((admin, i) => `
+    <li><span class="row">
+      <span class="grow">${esc(admin.name)}${admin.owner ? " (" + t("owner") + ")" : ""}<br>
+        <span class="secondary small">${esc(admin.username)}${SEP}${esc(departmentName(admin.department))}${SEP}${esc(t(admin.stage.replace("stage", "Stage ")))}</span></span>
+      ${admin.key === settings.key ? "" : `<button class="delete" type="button" data-key="${i}">${t("Delete")}</button>`}
+    </span></li>`).join("");
+
+  app.innerHTML = `
+    <a class="back" href="#home">${esc(stageName(ownStage()))}</a>
+    <h1>${t("Admins")}</h1>
+    <p class="lead secondary">${t("Make a token on GitHub for each admin, register it here, then send it to them privately.")}</p>
+    <form class="card" novalidate>
+      <div class="field"><label for="newName">${t("Full name")}</label><input id="newName" type="text" autocomplete="off" placeholder="First Father Grandfather">
+        <p class="hint">${t("Three-part name, in English.")}</p></div>
+      <div class="field"><label for="newUsername">${t("Username")}</label><input id="newUsername" type="text" autocomplete="off" autocapitalize="none" spellcheck="false"></div>
+      <div class="field"><label for="newDepartment">${t("Department")}</label><select id="newDepartment"></select></div>
+      <div class="field"><label for="newStage">${t("Stage")}</label><select id="newStage"></select></div>
+      <div class="field"><label for="newToken">${t("Their access token")}</label><input id="newToken" type="password" autocomplete="off">
+        <p class="hint">${t("Only its fingerprint is saved, never the token itself.")}</p></div>
+      <button class="primary" type="submit">${t("Add admin")}</button>
+    </form>
+    <h2>${t("Registered")}</h2>
+    <ul class="group">${rows}</ul>`;
+  linkPickers($("newDepartment"), $("newStage"));
+
+  onSubmit(async () => {
+    const entry = {
+      key: "",
+      name: typed("newName").replace(/\s+/g, " "),
+      username: typed("newUsername"),
+      department: $("newDepartment").value,
+      stage: $("newStage").value
+    };
+    const token = typed("newToken");
+    if (!isFullName(entry.name)) return say("Enter their full three-part name, in English letters.", "error");
+    if (!entry.username) return say("Enter their username.", "error");
+    if (!token) return say("Paste their access token.", "error");
+    entry.key = await fingerprint(token);
+    const saved = await saveAdmins("Add admin: " + entry.name, list => {
+      if (list.some(other => other.key === entry.key)) throw new Error("That token is already registered.");
+      list.push(entry);
+    }, "Admin added.");
+    if (saved) route(true);
+  });
+
+  onDelete(async key => {
+    const admin = admins[Number(key)];
+    const saved = await saveAdmins("Remove admin: " + admin.name, list => {
+      const i = list.findIndex(other => other.key === admin.key);
+      if (i === -1) throw new Error("That admin is already gone. Reload the page.");
+      list.splice(i, 1);
+    }, "Admin removed.");
+    if (saved) route(true);
+  });
+}
+
+// Reads the newest admins.json, lets `edit` change the list, and saves it. Returns true if saved.
+async function saveAdmins(message, edit, doneText) {
+  setBusy(true);
+  say("Saving…", "busy");
+  try {
+    const fresh = await readAdmins();
+    edit(fresh.list);
+    await writeAdmins(fresh.list, fresh.sha, message);
+    admins = fresh.list;
+    say(doneText, "done");
+    return true;
+  } catch (error) {
+    say(explain(error), "error");
+    return false;
+  } finally {
+    setBusy(false);
+  }
+}
+
+function showNotFound() {
+  document.title = localTitle("Page not found | Admin");
+  app.innerHTML = `
+    <h1>${t("Page not found")}</h1>
+    <p class="text-block empty">${t("This page isn’t part of your admin area, or it was removed.")} <a href="#home">${t("Back to the start")}</a></p>`;
+}
+
+// ---------- Decides which page to draw, based on the part after # in the address ----------
+// #home is the admin's own stage. Other stages can't be opened.
+// Examples: #home   #news   #admins (owner only)   #stage1   #stage1-sem2   #stage1-sem2-add (new course)
+//           #stage1-cs101   #stage1-cs101-add (new lecture)
+//           #stage1-cs101-sources   #stage1-cs101-sources-add   #stage1-cs101-details
+function route(keepScroll) {
+  if (!data) return; // not signed in yet
+  const name = location.hash.replace("#", "");
+  if (!keepScroll) window.scrollTo(0, 0);
+
+  const own = ownStage();
+  if (name === "" || name === "home") return showStage(own, 1);
+  if (name === "news") return showNews();
+  if (name === "admins") return settings.owner ? showAdmins() : showNotFound();
+
+  const [stageId, courseId, part, extra] = name.split("-");
+  const stage = data.stages.find(s => s.id === stageId);
+  if (!stage) return showNotFound();
+  if (stage !== own) return showNotFound(); // an admin stays inside their own stage
+  if (courseId === undefined || courseId === "sem1" || courseId === "sem2") {
+    const semester = courseId === "sem2" ? 2 : 1;
+    return part === "add" ? showAddCourse(stage, semester) : showStage(stage, semester);
+  }
+
+  const course = stage.courses.find(c => c.id === courseId);
+  if (!course) return showNotFound();
+  if (part === undefined) return showCourse(stage, course, "lectures");
+  if (part === "add") return showAddLecture(stage, course);
+  if (part === "details") return showCourse(stage, course, "details");
+  if (part === "sources") return extra === "add" ? showAddSource(stage, course) : showCourse(stage, course, "sources");
+  showNotFound();
+}
+
+window.addEventListener("hashchange", () => route());
+
+// ---------- Signing in ----------
+function showConnected() {
+  $("signIn").hidden = true;
+  $("session").hidden = false;
+  $("connectedLabel").textContent = t(preview ? "Preview of" : "Connected as");
+  $("connectedName").textContent = preview ? localName(dept) : settings.name;
+  $("connectedDetails").textContent = (preview ? "" : settings.username + SEP + localName(dept) + SEP) + stageName(ownStage());
+  $("changeButton").textContent = t(preview ? "Close" : "Sign out");
+  $("previewNote").hidden = !preview;
+  route();
+}
+
+function showSignIn() {
+  $("signIn").hidden = false;
+  $("session").hidden = true;
+  $("connectForm").hidden = false;
+  $("setupForm").hidden = true;
+  $("previewCard").hidden = false;
+  say("");
+}
+
+// Signs in with a token: checks it with GitHub, then looks up who it belongs to
+async function signIn(token) {
+  const status = $("connectStatus");
+  setStatus(status, "Signing in…");
+  preview = false;
+  settings = { token: token };
+  try {
+    const key = await fingerprint(token);
+    const found = await github("");
+    if (found.permissions && !found.permissions.push) {
+      throw Object.assign(new Error("no write access"), { status: 403 });
+    }
+    const registered = await readAdmins();
+    admins = registered.list;
+
+    // Nobody is registered yet: this person sets themselves up as the owner
+    if (admins.length === 0) {
+      setStatus(status, "");
+      $("connectForm").hidden = true;
+      $("previewCard").hidden = true;
+      $("setupForm").hidden = false;
+      return;
+    }
+
+    const me = admins.find(admin => admin.key === key);
+    if (!me) throw new Error("This token isn’t registered on the site. Ask the site owner to add you.");
+    settings = Object.assign({}, me, { token: token });
+    dept = departments.find(department => department.id === me.department);
+    if (!dept) throw new Error("Your department is no longer on the site. Ask the site owner.");
+    data = (await readData()).data;
+    if (!ownStage()) throw new Error("Your stage is no longer on the site. Ask the site owner.");
+
+    // Only the token is remembered. Everything else is looked up again each time.
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify({ token: token })); } catch (error) { /* storage blocked */ }
+    setStatus(status, "");
+    $("token").value = "";
+    showConnected();
+  } catch (error) {
+    data = null;
+    showSignIn();
+    setStatus(status, explain(error), "error");
+  }
+}
+
+$("connectForm").addEventListener("submit", event => {
+  event.preventDefault();
+  const token = typed("token");
+  if (!token) return setStatus($("connectStatus"), "Paste your access token.", "error");
+  history.replaceState(null, "", "#home"); // start from the first page
+  signIn(token);
+});
+
+// First-time setup: the owner registers themselves
+$("setupForm").addEventListener("submit", async event => {
+  event.preventDefault();
+  const status = $("setupStatus");
+  const token = settings.token;
+  const owner = {
+    key: "",
+    name: typed("ownerName").replace(/\s+/g, " "),
+    username: typed("ownerUsername"),
+    department: $("ownerDepartment").value,
+    stage: $("ownerStage").value,
+    owner: true
+  };
+  if (!isFullName(owner.name)) return setStatus(status, "Enter your full three-part name, in English letters.", "error");
+  if (!owner.username) return setStatus(status, "Enter a username.", "error");
+  setStatus(status, "Saving…");
+  try {
+    owner.key = await fingerprint(token);
+    settings.name = owner.name; // so this first change carries the owner's name
+    const fresh = await readAdmins();
+    if (fresh.list.length) throw new Error("Someone else was registered just now. Reload the page.");
+    await writeAdmins([owner], fresh.sha, "Register the owner: " + owner.name);
+    setStatus(status, "");
+    signIn(token);
+  } catch (error) {
+    setStatus(status, explain(error), "error");
+  }
+});
+
+// Preview mode: no token needed
+$("previewButton").addEventListener("click", async () => {
+  preview = true;
+  settings = { name: "", username: "", department: $("department").value, stage: $("adminStage").value, token: "" };
+  dept = departments.find(department => department.id === settings.department);
+  history.replaceState(null, "", "#home");
+  try {
+    previewData = null;
+    data = (await readData()).data;
+    showConnected();
+  } catch (error) {
+    data = null;
+    setStatus($("connectStatus"), explain(error), "error");
+  }
+});
+
+// Sign out: forget the token on this device and go back to the sign-in page
+$("changeButton").addEventListener("click", () => {
+  try { localStorage.removeItem(SETTINGS_KEY); } catch (error) { /* storage blocked */ }
+  settings = null;
+  data = null;
+  showSignIn();
+});
+
+// ---------- Start ----------
+// Load the list of departments, then sign in straight away if this device remembers a token
+async function start() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)); } catch (error) { saved = null; }
+  try {
+    await loadCatalog();
+    await linkPickers($("department"), $("adminStage"));        // the preview card
+    await linkPickers($("ownerDepartment"), $("ownerStage"));   // the first-time setup card
+  } catch (error) {
+    showSignIn();
+    const message = error instanceof TypeError ? "Can’t load the list of departments. Check your connection, then reload." : error.message;
+    return setStatus($("connectStatus"), message, "error");
+  }
+  if (saved && saved.token) signIn(saved.token);
+  else showSignIn();
+}
+start();
+</script>
+</body>
+</html>

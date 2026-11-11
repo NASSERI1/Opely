@@ -1,0 +1,30 @@
+{
+  "updated": "2026-11-11T13:52:48.000Z",
+  "stages": [
+    {
+      "id": "stage1",
+      "name": "Stage 1",
+      "color": "blue",
+      "courses": []
+    },
+    {
+      "id": "stage2",
+      "name": "Stage 2",
+      "color": "orange",
+      "courses": []
+    },
+    {
+      "id": "stage3",
+      "name": "Stage 3",
+      "color": "green",
+      "courses": []
+    },
+    {
+      "id": "stage4",
+      "name": "Stage 4",
+      "color": "purple",
+      "courses": []
+    }
+  ],
+  "announcements": []
+}

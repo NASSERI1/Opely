@@ -1,0 +1,52 @@
+{
+  "universities": [
+    {
+      "id": "university",
+      "name": "University",
+      "faculties": [
+        {
+          "id": "csm",
+          "name": "Faculty of Computer Science and Mathematics",
+          "departments": [
+            {
+              "id": "cs",
+              "name": "Computer Science",
+              "short": "CS",
+              "color": "blue",
+              "data": "data/cs.json",
+              "names": {
+                "ar": "علوم الحاسوب"
+              }
+            },
+            {
+              "id": "ai",
+              "name": "Artificial Intelligence",
+              "short": "AI",
+              "color": "purple",
+              "data": "data/ai.json",
+              "names": {
+                "ar": "الذكاء الاصطناعي"
+              }
+            },
+            {
+              "id": "cyber",
+              "name": "Cybersecurity",
+              "short": "SEC",
+              "color": "green",
+              "data": "data/cyber.json",
+              "names": {
+                "ar": "الأمن السيبراني"
+              }
+            }
+          ],
+          "names": {
+            "ar": "كلية علوم الحاسوب والرياضيات"
+          }
+        }
+      ],
+      "names": {
+        "ar": "الجامعة"
+      }
+    }
+  ]
+}

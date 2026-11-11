@@ -1,0 +1,407 @@
+/* =====================================================================
+   OPELY — the one stylesheet for every page
+   (the student page index.html and the admin page admin.html)
+
+   The look follows Apple's "Liquid Glass": a plain, quiet background,
+   and content resting on clear glass surfaces with a bright rim and a
+   soft shadow. Bars and messages float over the page and blur what
+   passes under them.
+
+   Everything is built from the few values in ":root" below. To change
+   a colour or a corner, change it there and every page follows.
+   ===================================================================== */
+
+/* ---------- Colours, glass, and corners ---------- */
+:root {
+  /* Colours */
+  --bg: #F2F2F7;
+  --label: #000000;
+  --secondary: #6C6C70;
+  --separator: rgba(60, 60, 67, 0.18);
+  --tint: #007AFF;
+  --red: #D70015;
+  --green: #1B7F3B;
+
+  /* Glass */
+  --glass: rgba(255, 255, 255, 0.66);        /* a surface resting on the page */
+  --glass-float: rgba(255, 255, 255, 0.58);  /* a surface floating over content (it also blurs) */
+  --glass-thick: rgba(255, 255, 255, 0.88);  /* thicker glass, for messages that must stay readable */
+  --glass-rim: rgba(255, 255, 255, 0.95);    /* the bright line where light catches the top edge */
+  --glass-edge: rgba(0, 0, 0, 0.05);         /* the faint outline */
+  --glass-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 10px 30px -12px rgba(0, 0, 0, 0.14);
+  --field: rgba(118, 118, 128, 0.12);        /* text fields and the track of a switch */
+  --thumb: #FFFFFF;                          /* the chosen part of a switch */
+  --blur: saturate(180%) blur(22px);
+
+  /* Corners: only these four are used, everywhere */
+  --r-surface: 26px;   /* cards, widgets, lists, the open drop-down list */
+  --r-control: 14px;   /* text fields, drop-down buttons, the file button */
+  --r-chip: 10px;      /* small badges: stage number, lecture number */
+  --r-pill: 999px;     /* buttons, switches, the top bar, course codes */
+
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Arabic", "Helvetica Neue",
+          "Segoe UI", Roboto, "Noto Sans Arabic", "Geeza Pro", Tahoma, Arial, sans-serif;
+
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Dark Mode: follows the device. The same rules are written twice so that a
+   page can also be forced light or dark with data-theme on the <html> tag. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #000000;
+    --label: #FFFFFF;
+    --secondary: #98989F;
+    --separator: rgba(84, 84, 88, 0.6);
+    --tint: #0A84FF;
+    --red: #FF6961;
+    --green: #30D158;
+    --glass: rgba(255, 255, 255, 0.09);
+    --glass-float: rgba(44, 44, 46, 0.62);
+    --glass-thick: rgba(44, 44, 46, 0.92);
+    --glass-rim: rgba(255, 255, 255, 0.2);
+    --glass-edge: rgba(255, 255, 255, 0.07);
+    --glass-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.7);
+    --field: rgba(118, 118, 128, 0.26);
+    --thumb: #636366;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --label: #FFFFFF;
+  --secondary: #98989F;
+  --separator: rgba(84, 84, 88, 0.6);
+  --tint: #0A84FF;
+  --red: #FF6961;
+  --green: #30D158;
+  --glass: rgba(255, 255, 255, 0.09);
+  --glass-float: rgba(44, 44, 46, 0.62);
+  --glass-thick: rgba(44, 44, 46, 0.92);
+  --glass-rim: rgba(255, 255, 255, 0.2);
+  --glass-edge: rgba(255, 255, 255, 0.07);
+  --glass-shadow: 0 10px 30px -12px rgba(0, 0, 0, 0.7);
+  --field: rgba(118, 118, 128, 0.26);
+  --thumb: #636366;
+}
+
+/* One colour per stage or department. Use these names in a "color" field. */
+.blue   { --a1: #3D9BFF; --a2: #0060DF; }
+.orange { --a1: #FF9A3D; --a2: #C85A00; }
+.green  { --a1: #3CC46A; --a2: #17853A; }
+.purple { --a1: #C07BF0; --a2: #8433C0; }
+.pink   { --a1: #FF6B8E; --a2: #C22455; }
+.teal   { --a1: #3BBBD0; --a2: #0F7C91; }
+
+/* ---------- Base ---------- */
+[hidden] { display: none !important; } /* hidden parts stay hidden, whatever their other styles say */
+*, *::before, *::after { box-sizing: inherit; }
+html { scroll-padding-top: calc(env(safe-area-inset-top, 0px) + 76px); background: var(--bg); }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--label);
+  font-family: var(--font);
+  font-size: 17px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap { max-width: 52rem; margin: 0 auto; padding: 16px 20px 104px; }
+a { color: var(--tint); text-decoration: none; }
+a:focus-visible, button:focus-visible, input:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 3px solid var(--tint); outline-offset: 2px;
+}
+h1 { font-size: 34px; font-weight: 700; letter-spacing: -0.4px; line-height: 1.12; margin: 8px 0 0; text-wrap: balance; }
+h2 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 40px 6px 12px; }
+:lang(ar) h1, :lang(ar) h2, :lang(ar) .title { letter-spacing: 0; line-height: 1.3; } /* Arabic letters join, so they are never spaced apart */
+p { margin: 0; }
+.secondary { color: var(--secondary); }
+.small { font-size: 13px; }
+.lead { margin-top: 8px; max-width: 34rem; }
+/* Names and text typed by admins can be in a different language from the page.
+   Each one is laid out in its own direction, so English ends with its full stop on the right side. */
+h1, .title, .text-block, .message, .grow { unicode-bidi: plaintext; }
+.count { margin: 32px 6px 12px; }
+.empty { margin-top: 16px; }
+
+/* ---------- Glass ----------
+   Every surface below shares these lines, so they all look like the same material. */
+.widget, .card, .group, .text-block, .connected, .pager a, .page {
+  background: var(--glass);
+  border-radius: var(--r-surface);
+  box-shadow: inset 0 1px 0 var(--glass-rim), inset 0 0 0 1px var(--glass-edge), var(--glass-shadow);
+}
+/* Floating glass: it sits over the page and blurs what passes under it */
+.bar-inner, .toast, .picker-list {
+  background: var(--glass-float);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
+  box-shadow: inset 0 1px 0 var(--glass-rim), inset 0 0 0 1px var(--glass-edge), 0 12px 34px -10px rgba(0, 0, 0, 0.24);
+}
+
+/* ---------- Top bar: a glass capsule that floats above the page ---------- */
+.bar {
+  position: sticky; z-index: 9;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  padding: 10px 12px 0;
+}
+.bar::before { /* fades the page out behind the bar, so text stays readable as it scrolls under */
+  content: ""; position: absolute; z-index: -1; inset: -40px 0 -14px;
+  background: linear-gradient(var(--bg) 45%, transparent);
+  pointer-events: none;
+}
+.bar-inner {
+  max-width: calc(52rem - 16px); margin: 0 auto; min-height: 50px; padding: 0 20px;
+  display: flex; justify-content: space-between; align-items: center; gap: 16px;
+  border-radius: var(--r-pill);
+}
+.bar .home { font-weight: 700; color: var(--label); }
+.icon-button { /* a round button in the top bar, holding a small picture */
+  display: grid; place-items: center; flex: none;
+  width: 44px; height: 44px; margin-inline-end: -12px; border-radius: var(--r-pill);
+  color: var(--secondary);
+}
+.icon-button svg { width: 24px; height: 24px; }
+.icon-button:active, .icon-button[aria-current] { color: var(--tint); }
+.back { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; margin-top: 4px; }
+.back::before { /* back arrow: points to where the page came from, in either reading direction */
+  content: ""; width: 10px; height: 10px; margin-inline-start: 2px;
+  border-inline-start: 2.5px solid currentColor; border-bottom: 2.5px solid currentColor;
+  transform: rotate(45deg);
+}
+[dir="rtl"] .back::before { transform: rotate(-45deg); }
+
+/* ---------- Widgets ---------- */
+.widgets { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; margin-top: 28px; }
+@media (min-width: 44rem) { .widgets { grid-template-columns: repeat(4, 1fr); } }
+.widget {
+  position: relative; overflow: hidden;
+  display: flex; flex-direction: column; justify-content: space-between; gap: 16px;
+  padding: 18px; color: var(--label);
+  transition: transform 0.18s ease;
+}
+a.widget:active { transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) { .widget { transition: none; } }
+.widget.square { aspect-ratio: 1; }
+.widget.medium { grid-column: 1 / -1; min-height: 132px; }
+.widget.wide { grid-column: 1 / -1; gap: 10px; } /* full width, only as tall as its text */
+.widget .title { font-size: 20px; font-weight: 700; letter-spacing: -0.2px; line-height: 1.18; }
+
+/* Tinted glass: the coloured widgets for departments and stages */
+.widget.filled {
+  background: linear-gradient(160deg, var(--a1), var(--a2)); color: #FFFFFF;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.55), inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+              0 14px 28px -14px var(--a2);
+}
+.widget.filled::before { /* light falling on the top of the glass */
+  content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.3), rgba(255, 255, 255, 0) 46%);
+}
+.widget.filled > * { position: relative; } /* keeps the text above that light */
+.widget.filled .secondary { color: rgba(255, 255, 255, 0.9); }
+
+.widget.add { /* the “add something new” widget: an empty outline */
+  background: none; box-shadow: none; border: 2px dashed var(--separator); color: var(--tint);
+  align-items: center; justify-content: center; text-align: center; gap: 6px;
+}
+.widget.add .plus { font-size: 34px; font-weight: 300; line-height: 1; }
+
+.glyph { /* the small badge on a department or stage widget */
+  min-width: 36px; height: 36px; padding: 0 8px; border-radius: var(--r-chip); align-self: flex-start;
+  display: grid; place-items: center;
+  background: rgba(255, 255, 255, 0.24); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  font-size: 19px; font-weight: 700;
+}
+.pill { /* the course code badge */
+  display: inline-block; align-self: flex-start; padding: 3px 10px; border-radius: var(--r-pill);
+  background: linear-gradient(160deg, var(--a1), var(--a2)); color: #FFFFFF;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
+  font-size: 13px; font-weight: 600;
+}
+.kicker { font-size: 13px; font-weight: 600; color: var(--tint); }
+
+/* Department widgets: one per row on a phone, three per row on a wide screen */
+.depts { grid-template-columns: 1fr; margin-top: 0; }
+@media (min-width: 44rem) { .depts { grid-template-columns: repeat(3, 1fr); } }
+.widget.dept { min-height: 124px; }
+
+/* Course widgets */
+.courses { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 44rem) { .courses { grid-template-columns: 1fr 1fr; } }
+.widget.course { min-height: 152px; }
+.widget.course .top { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.course-head { margin-top: 12px; }
+.course-head h1 { margin-top: 14px; }
+.course-head p { margin-top: 8px; }
+.notice { margin-top: 20px; }
+
+/* ---------- Switch (semesters, the parts of a course) ---------- */
+.segments {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+  max-width: 26rem; padding: 3px; margin-top: 24px;
+  border-radius: var(--r-pill); background: var(--field);
+}
+.segments.three { grid-template-columns: repeat(3, 1fr); }
+.segment {
+  display: grid; place-items: center; min-height: 38px; /* 44px with the track around it: easy to tap */
+  padding: 6px 8px; border-radius: var(--r-pill); text-align: center;
+  font-size: 15px; font-weight: 500; color: var(--label);
+}
+button.segment { min-height: 38px; padding: 6px 8px; background: none; font-weight: 500; }
+.setting { margin-top: 0; }
+main > p.hint { margin: 8px 6px 0; } /* a short note under a switch or a list */
+.segment[aria-current] { /* the chosen part: a small piece of glass */
+  background: var(--thumb); font-weight: 600;
+  box-shadow: inset 0 1px 0 var(--glass-rim), 0 2px 8px rgba(0, 0, 0, 0.14);
+}
+
+/* ---------- Lists ---------- */
+.group { overflow: hidden; margin: 0; padding: 0; list-style: none; }
+.group > li + li { border-top: 0.5px solid var(--separator); margin-inline-start: 18px; }
+.group > li + li > .row { margin-inline-start: -18px; }
+.row {
+  display: flex; align-items: center; gap: 12px;
+  min-height: 58px; padding: 8px 18px; color: var(--label);
+}
+.row .grow { flex: 1; min-width: 0; padding: 6px 0; overflow-wrap: anywhere; }
+.row .num { /* lecture number badge */
+  flex: none; width: 30px; height: 30px; border-radius: var(--r-chip);
+  display: grid; place-items: center;
+  background: var(--field); color: var(--secondary);
+  font-size: 15px; font-weight: 600;
+}
+a.row::after { /* forward arrow: this row opens something */
+  content: ""; width: 8px; height: 8px; flex: none;
+  border-inline-end: 2px solid var(--secondary); border-top: 2px solid var(--secondary);
+  transform: rotate(45deg); opacity: 0.55;
+}
+[dir="rtl"] a.row::after { transform: rotate(-45deg); }
+a.row:active { background: var(--field); }
+.row:has(> button.delete) { padding-inline-end: 8px; }
+.text-block { padding: 16px 20px; line-height: 1.5; }
+
+/* Announcements */
+.news { display: grid; gap: 12px; margin-top: 24px; }
+.news .text-block { overflow-wrap: anywhere; }
+.news .message { white-space: pre-line; } /* keeps the line breaks the admin typed */
+.news .title { display: block; font-size: 19px; font-weight: 700; line-height: 1.25; }
+.news .meta { display: block; margin: 4px 0 10px; }
+
+/* Previous and next buttons on a lecture */
+.pager { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 40px; }
+.pager a {
+  display: grid; place-items: center; min-height: 50px; padding: 0 16px;
+  border-radius: var(--r-pill); font-weight: 600; text-align: center;
+}
+.pager a:active { transform: scale(0.97); }
+
+/* ---------- Buttons ---------- */
+button, .button {
+  font: inherit; font-weight: 600; cursor: pointer; color: inherit;
+  border: 0; border-radius: var(--r-pill); min-height: 50px; padding: 0 22px;
+}
+button.primary, .button { /* the main action: tinted glass */
+  display: grid; place-items: center; width: 100%; margin-top: 24px;
+  background: var(--tint); color: #FFFFFF; text-align: center;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 10px 22px -12px var(--tint);
+}
+.file-actions .button { display: inline-grid; width: auto; margin-top: 16px; min-height: 46px; }
+button.primary:active, .button:active { transform: scale(0.98); }
+button.plain { background: none; color: var(--tint); min-height: 44px; padding: 0 6px; }
+button.delete { flex: none; background: none; color: var(--red); min-height: 44px; padding: 0 10px; font-size: 15px; }
+button.danger { /* a destructive action: clear glass with red text */
+  width: 100%; margin-top: 16px; background: var(--glass); color: var(--red);
+  box-shadow: inset 0 1px 0 var(--glass-rim), inset 0 0 0 1px var(--glass-edge), var(--glass-shadow);
+}
+button:disabled { opacity: 0.5; cursor: default; }
+
+/* ---------- Forms ---------- */
+.card { padding: 22px; margin-top: 24px; }
+.card h2 { margin: 0 0 4px; }
+.field { margin-top: 18px; }
+.card > .field:first-child, .card > .two:first-child .field { margin-top: 0; }
+.field label { display: block; font-size: 15px; font-weight: 600; margin: 0 4px 6px; }
+.field .hint { font-size: 13px; color: var(--secondary); margin: 6px 4px 0; }
+input[type="text"], input[type="password"], input[type="url"], input[type="date"], select, textarea, .picker-button {
+  width: 100%; font: inherit; font-weight: 400; color: var(--label); text-align: start;
+  background: var(--field); border: 0; border-radius: var(--r-control);
+  padding: 12px 14px; min-height: 48px;
+}
+textarea { min-height: 96px; resize: vertical; }
+/* Links and tokens are always written left to right, even on an Arabic page */
+input[type="url"], input[type="password"] { direction: ltr; }
+[dir="rtl"] input[type="url"], [dir="rtl"] input[type="password"] { text-align: right; }
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; } /* two equal columns */
+
+input[type="file"] { width: 100%; font: inherit; font-size: 15px; color: var(--secondary); }
+input[type="file"]::file-selector-button { /* the “Choose files” button */
+  font: inherit; font-weight: 600; cursor: pointer;
+  min-height: 44px; margin-inline-end: 12px; padding: 0 18px;
+  border: 0; border-radius: var(--r-pill);
+  background: var(--field); color: var(--tint);
+}
+input[type="file"]:disabled::file-selector-button { opacity: 0.5; cursor: default; }
+
+.status { margin: 16px 4px 0; font-size: 15px; min-height: 1.4em; }
+.status.error { color: var(--red); }
+
+/* ---------- Drop-down lists, drawn in our own design ---------- */
+.picker { position: relative; }
+.picker-button { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.picker-button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.picker-button::after { /* the arrow */
+  content: ""; flex: none; width: 8px; height: 8px; margin-block-start: -4px; margin-inline-end: 2px;
+  border-right: 2px solid var(--secondary); border-bottom: 2px solid var(--secondary);
+  transform: rotate(45deg);
+}
+.picker-button[aria-expanded="true"]::after { transform: rotate(-135deg); margin-block-start: 4px; }
+.picker-list { /* the open list: floating glass */
+  background: var(--glass-thick);
+  position: absolute; z-index: 5; top: calc(100% + 6px); inset-inline-start: 0;
+  min-width: 100%; width: max-content; max-width: min(20rem, calc(100vw - 80px)); max-height: 19rem; overflow-y: auto;
+  margin: 0; padding: 0; list-style: none;
+  border-radius: var(--r-surface);
+}
+.picker-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 18px; }
+.picker-list .option { min-height: 48px; cursor: pointer; }
+.picker-list .option + .option { border-top: 0.5px solid var(--separator); }
+.picker-list .option:hover, .picker-list .option:focus { background: var(--field); outline: none; }
+.picker-list .option[aria-selected="true"] { font-weight: 600; }
+.picker-list .option[aria-selected="true"]::after { /* the tick on the chosen one */
+  content: ""; flex: none; width: 7px; height: 13px; margin-block-start: -3px; margin-inline-end: 4px;
+  border-right: 2.5px solid var(--tint); border-bottom: 2.5px solid var(--tint);
+  transform: rotate(45deg);
+}
+.picker-list .heading { min-height: 34px; padding-top: 8px; padding-bottom: 8px; font-size: 13px; color: var(--secondary); }
+
+/* ---------- Admin: who is signed in ---------- */
+.connected {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  margin-top: 4px; padding: 10px 14px 10px 20px;
+  padding-inline: 20px 14px;
+}
+.connected span { overflow-wrap: anywhere; }
+.connected button { flex: none; white-space: nowrap; }
+.preview-note { margin: 10px 6px 0; color: var(--secondary); }
+
+/* ---------- Message at the bottom of the screen (saving, saved, errors) ---------- */
+.toast {
+  position: fixed; z-index: 20; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  width: max-content; max-width: calc(100% - 40px);
+  padding: 13px 22px; border-radius: var(--r-surface); background: var(--glass-thick);
+  color: var(--label); font-size: 15px; font-weight: 600; text-align: center;
+}
+.toast.error { color: var(--red); }
+.toast.done { color: var(--green); }
+
+/* ---------- File viewer (a PDF shown inside the page) ---------- */
+.pages { display: grid; gap: 10px; margin: 20px -20px 0; } /* edge to edge on a phone */
+@media (min-width: 44rem) { .pages { margin: 20px 0 0; gap: 16px; } }
+.page { background: #FFFFFF; overflow: hidden; border-radius: 0; direction: ltr; } /* a PDF page is drawn left to right, whatever the language of the site */
+@media (min-width: 44rem) { .page { border-radius: var(--r-surface); } }
+.page canvas { display: block; width: 100%; height: auto; }
+

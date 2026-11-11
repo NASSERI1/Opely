@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Lectures, slides, and announcements for every department and stage.">
+<title>Opely</title>
+<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="style.css">
+<script src="lang.js"></script>
+</head>
+<body>
+<header class="bar">
+  <div class="bar-inner">
+    <a class="home" href="#home">Opely</a>
+    <a class="icon-button" href="#settings" aria-label="Settings" title="Settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="3.2"/>
+        <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.04 1.56V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1.04H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 8.86a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1.04-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.04 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9c.26.6.85 1 1.5 1.04H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/>
+      </svg>
+    </a>
+  </div>
+</header>
+<div class="wrap">
+
+  <!-- Every page is drawn inside this element by the script below -->
+  <main id="app"></main>
+</div>
+
+<script>
+/* =====================================================================
+   STUDENT PAGE
+   The look comes from style.css. The words come through lang.js: text
+   wrapped in t("...") is shown in the language of the visitor's device.
+
+   catalog.json lists the departments, grouped by university and faculty.
+   Each department has its own content file, for example data/cs.json.
+   The admin page (admin.html) updates those files. This page keeps
+   copies in the browser so it opens instantly, then asks the site
+   whether there are newer copies.
+   ===================================================================== */
+let faculties = [];      // every faculty in catalog.json, each with its departments
+let departments = [];    // every department, as one flat list
+let catalogText = null;  // the text of catalog.json being shown (null = not loaded yet)
+const content = {};      // department id -> { text, stages, announcements }
+let loadFailed = false;
+const CACHE_PREFIX = "opely:";
+const FILE_CACHE = "opely-files"; // where downloaded PDFs are kept in this browser
+let viewNumber = 0;       // goes up each time a page is drawn, so slow work for an old page can stop
+let fileUrl = null;       // the address of the PDF being viewed, for its Download button
+let pageWatcher = null;   // notices which PDF pages are near the screen
+
+const app = document.getElementById("app");
+translatePage(); // the few words written in the HTML above
+document.querySelector(".icon-button").setAttribute("aria-label", t("Settings"));
+document.querySelector(".icon-button").title = t("Settings");
+
+// Makes text safe to place inside HTML
+function esc(text) {
+  return String(text)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+// Files stored in the repository download; outside links open in a new tab
+function linkAttrs(url) {
+  return /^https?:/.test(url) ? 'target="_blank" rel="noopener"' : "download";
+}
+
+// A PDF stored in the repository can be saved in the browser and shown inside the page
+function isPdf(url) {
+  return !/^https?:/.test(url) && /\.pdf$/i.test(url);
+}
+
+// One row in a list of files. `viewer` is the address of the in-page viewer for this file.
+function fileRow(file, viewer) {
+  if (!file.url) {
+    return `<li><span class="row"><span class="grow">${esc(file.label)}</span><span class="secondary small">${t("Not added yet")}</span></span></li>`;
+  }
+  if (isPdf(file.url)) {
+    return `<li><a class="row" href="${viewer}" data-saved="${esc(file.url)}"><span class="grow">${esc(file.label)}</span><span class="secondary small"></span></a></li>`;
+  }
+  return `<li><a class="row" href="${esc(file.url)}" ${linkAttrs(file.url)}><span class="grow">${esc(file.label)}</span></a></li>`;
+}
+
+// Writes “Saved” next to the files that are already stored in this browser
+async function markSaved() {
+  if (!window.caches) return;
+  const cache = await caches.open(FILE_CACHE);
+  document.querySelectorAll("[data-saved]").forEach(async row => {
+    if (await cache.match(row.dataset.saved)) row.querySelector(".small").textContent = t("Saved");
+  });
+}
+
+// Collects every lecture in the given stages, newest first
+function allLectures(stageList) {
+  const found = [];
+  stageList.forEach(stage => stage.courses.forEach(course =>
+    course.lectures.forEach((lecture, i) =>
+      found.push({ stage, course, lecture, number: i + 1 }))));
+  return found.sort((a, b) => b.lecture.date.localeCompare(a.lecture.date));
+}
+
+// The wide widget that shows the newest lecture of a department
+function latestWidget(dept, stageList) {
+  const latest = allLectures(stageList)[0];
+  if (!latest) {
+    return `<div class="widget medium">
+      <span class="kicker">${t("Latest")}</span>
+      <span class="secondary">${t("No lectures yet.")}</span>
+    </div>`;
+  }
+  return `<a class="widget medium" href="#${dept.id}-${latest.stage.id}-${latest.course.id}-${latest.lecture.id || latest.number}">
+    <span class="kicker">${t("Latest")}</span>
+    <span>
+      <span class="title">${esc(latest.lecture.title)}</span><br>
+      <span class="secondary small">${esc(stageName(latest.stage) + SEP + latest.course.title)}${SEP}${niceDate(latest.lecture.date)}</span>
+    </span>
+  </a>`;
+}
+
+// ----- Home: pick a department -----
+// Departments are grouped under their faculty. When more faculties or
+// universities are added to catalog.json, they appear here by themselves.
+function showDepartments() {
+  document.title = "Opely";
+  if (departments.length === 0) return showStatus("No departments yet.");
+
+  const manyUniversities = new Set(faculties.map(faculty => faculty.university.id)).size > 1;
+  const sections = faculties.map(faculty => {
+    const heading = manyUniversities ? localName(faculty.university) + SEP + faculty.name : faculty.name;
+    const widgets = faculty.departments.map(dept => `
+      <a class="widget dept filled ${esc(dept.color)}" href="#${dept.id}">
+        <span class="glyph">${esc(dept.short || dept.name.charAt(0))}</span>
+        <span class="title">${esc(localName(dept))}</span>
+      </a>`).join("");
+    return `<h2>${esc(heading)}</h2><div class="widgets depts">${widgets}</div>`;
+  }).join("");
+
+  app.innerHTML = `
+    <h1>${t("Departments")}</h1>
+    <p class="lead secondary">${t("Choose your department.")}</p>
+    ${sections}`;
+}
+
+// ----- Announcements -----
+// Newest first. With a stage id, only that stage's own announcements.
+function announcementsFor(dept, stageId) {
+  return content[dept.id].announcements
+    .filter(news => stageId === undefined || news.stage === stageId)
+    .sort((a, b) => b.date.localeCompare(a.date));
+}
+
+// A full-width widget with the newest announcement. Empty text if there is none.
+function newsWidget(dept, list, extraClass) {
+  if (list.length === 0) return "";
+  const more = list.length > 1 ? SEP + t("{n} more", { n: list.length - 1 }) : "";
+  return `<a class="widget wide ${extraClass || ""}" href="#${dept.id}-news">
+    <span class="kicker">${t(list.length > 1 ? "Announcements" : "Announcement")}</span>
+    <span>
+      <span class="title">${esc(list[0].title)}</span><br>
+      <span class="secondary small">${niceDate(list[0].date)}${more}</span>
+    </span>
+  </a>`;
+}
+
+// The page that lists every announcement of a department
+function showNews(dept, stages) {
+  document.title = t("Announcements") + " | " + localName(dept);
+  const cards = announcementsFor(dept).map(news => {
+    const stage = stages.find(s => s.id === news.stage);
+    return `<div class="text-block">
+      <span class="title">${esc(news.title)}</span>
+      <span class="meta secondary small">${niceDate(news.date)}${SEP}${esc(stage ? stageName(stage) : t("All stages"))}</span>
+      <span class="message">${esc(news.text || "")}</span>
+    </div>`;
+  }).join("");
+
+  app.innerHTML = `
+    <a class="back" href="#${dept.id}">${esc(localName(dept))}</a>
+    <h1>${t("Announcements")}</h1>
+    ${cards ? `<div class="news">${cards}</div>` : `<p class="lead secondary">${t("No announcements yet.")}</p>`}`;
+}
+
+// ----- A department: one widget per stage -----
+function showDepartment(dept, stages) {
+  document.title = localName(dept) + " | Opely";
+  const stageWidgets = stages.map((stage, i) => {
+    const lectures = allLectures([stage]).length;
+    return `<a class="widget square filled ${esc(stage.color)}" href="#${dept.id}-${stage.id}">
+      <span class="glyph">${i + 1}</span>
+      <span>
+        <span class="title">${esc(stageName(stage))}</span><br>
+        <span class="secondary small">${plural(stage.courses.length, "course")}${SEP}${plural(lectures, "lecture")}</span>
+      </span>
+    </a>`;
+  }).join("");
+
+  app.innerHTML = `
+    <a class="back" href="#home">${t("Departments")}</a>
+    <h1>${esc(localName(dept))}</h1>
+    ${stages.length
+      ? `<p class="lead secondary">${t("Choose your stage.")}</p>
+         <div class="widgets">${newsWidget(dept, announcementsFor(dept))}${latestWidget(dept, stages)}${stageWidgets}</div>`
+      : `<p class="lead secondary">${t("No stages yet.")}</p>`}`;
+}
+
+// ----- A stage’s channel: pick a semester, then see its courses -----
+function showStage(dept, stage, semester) {
+  const base = "#" + dept.id + "-" + stage.id;
+  document.title = stageName(stage) + SEP + t("Semester {n}", { n: semester }) + " | " + localName(dept);
+
+  // The two buttons that switch between semesters
+  const segments = [1, 2].map(number => `
+    <a class="segment" href="${base}-sem${number}" ${number === semester ? 'aria-current="page"' : ""}>${t("Semester {n}", { n: number })}</a>`).join("");
+
+  // This semester’s courses, in order of course code
+  const courses = stage.courses
+    .filter(course => course.semester === semester)
+    .sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true }));
+  const lectures = courses.reduce((total, course) => total + course.lectures.length, 0);
+
+  const courseWidgets = courses.map(course => {
+    const dates = course.lectures.map(lecture => lecture.date).sort();
+    const status = dates.length
+      ? t("Updated {date}", { date: niceDate(dates[dates.length - 1]) })
+      : t("No lectures yet");
+    return `<a class="widget course ${esc(stage.color)}" href="${base}-${course.id}">
+      <span class="top">
+        <span class="pill">${esc(course.code)}</span>
+        <span class="secondary small">${plural(course.lectures.length, "lecture")}</span>
+      </span>
+      <span>
+        <span class="title">${esc(course.title)}</span><br>
+        <span class="secondary small">${esc(course.instructor)}</span>
+      </span>
+      <span class="secondary small">${status}</span>
+    </a>`;
+  }).join("");
+
+  app.innerHTML = `
+    <a class="back" href="#${dept.id}">${esc(localName(dept))}</a>
+    <h1>${esc(stageName(stage))}</h1>
+    ${newsWidget(dept, announcementsFor(dept, stage.id), "notice")}
+    <nav class="segments" aria-label="${t("Semester")}">${segments}</nav>
+    ${courses.length
+      ? `<p class="count small secondary">${plural(courses.length, "course")}${SEP}${plural(lectures, "lecture")}</p>
+         <div class="courses">${courseWidgets}</div>`
+      : `<p class="text-block secondary empty">${t("No courses yet.")}</p>`}`;
+}
+
+// ----- A course: a switch between its lectures and its sources -----
+function showCourse(dept, stage, course, section) {
+  const base = "#" + dept.id + "-" + stage.id + "-" + course.id;
+  const sources = course.sources || [];
+  document.title = course.title + " | " + stageName(stage);
+
+  let list;
+  if (section === "sources") {
+    const rows = sources.map((source, i) => fileRow(source, base + "-sources-" + (i + 1))).join("");
+    list = sources.length
+      ? `<p class="count small secondary">${plural(sources.length, "source")}</p><ul class="group">${rows}</ul>`
+      : `<p class="text-block secondary empty">${t("No sources yet.")}</p>`;
+  } else {
+    const rows = course.lectures.map((lecture, i) => `
+      <li><a class="row" href="${base}-${lecture.id || i + 1}">
+        <span class="num">${i + 1}</span>
+        <span class="grow">${esc(lecture.title)}<br>
+          <span class="secondary small">${niceDate(lecture.date)}</span></span>
+      </a></li>`).join("");
+    list = course.lectures.length
+      ? `<p class="count small secondary">${plural(course.lectures.length, "lecture")}</p><ol class="group">${rows}</ol>`
+      : `<p class="text-block secondary empty">${t("No lectures yet.")}</p>`;
+  }
+
+  app.innerHTML = `
+    <a class="back" href="#${dept.id}-${stage.id}-sem${course.semester}">${esc(stageName(stage))}${SEP}${t("Semester {n}", { n: course.semester })}</a>
+    <div class="course-head ${esc(stage.color)}">
+      <span class="pill">${esc(course.code)}</span>
+      <h1>${esc(course.title)}</h1>
+      <p class="secondary">${esc(course.instructor)}</p>
+    </div>
+    <nav class="segments" aria-label="${t("Course content")}">
+      <a class="segment" href="${base}" ${section === "sources" ? "" : 'aria-current="page"'}>${t("Lectures")}</a>
+      <a class="segment" href="${base}-sources" ${section === "sources" ? 'aria-current="page"' : ""}>${t("Sources")}</a>
+    </nav>
+    ${list}`;
+  markSaved();
+}
+
+// ----- A single lecture -----
+function showLecture(dept, stage, course, number) {
+  const lecture = course.lectures[number - 1];
+  const base = "#" + dept.id + "-" + stage.id + "-" + course.id;
+  document.title = lecture.title + " | " + course.code;
+
+  const recording = lecture.video
+    ? `<a class="row" href="${esc(lecture.video)}" target="_blank" rel="noopener"><span class="grow">${t("Watch recording")}</span></a>`
+    : `<span class="row secondary">${t("No recording yet")}</span>`;
+
+  const here = base + "-" + (lecture.id || number);
+  const files = (lecture.files || []).map((file, i) => fileRow(file, here + "-" + (i + 1))).join("");
+
+  // Links use the lecture's id, so they keep working when lectures are added
+  const before = course.lectures[number - 2];
+  const after = course.lectures[number];
+  const previous = before ? `<a href="${base}-${before.id || number - 1}">${t("Previous")}</a>` : `<span></span>`;
+  const next = after ? `<a href="${base}-${after.id || number + 1}">${t("Next")}</a>` : `<span></span>`;
+
+  app.innerHTML = `
+    <a class="back" href="${base}">${esc(course.title)}</a>
+    <h1>${esc(lecture.title)}</h1>
+    <p class="secondary">${t("Lecture {n}", { n: number })}${SEP}${niceDate(lecture.date)}</p>
+    <h2>${t("Recording")}</h2>
+    <ul class="group"><li>${recording}</li></ul>
+    ${lecture.summary ? `<h2>${t("Summary")}</h2><p class="text-block">${esc(lecture.summary)}</p>` : ""}
+    <h2>${t("Files")}</h2>
+    ${files ? `<ul class="group">${files}</ul>` : `<p class="text-block secondary">${t("No files yet.")}</p>`}
+    <nav class="pager" aria-label="${t("Lectures")}">${previous}${next}</nav>`;
+  markSaved();
+}
+
+// ----- A PDF, shown inside the page -----
+// Gets a file: from this browser if it was saved before, otherwise from the
+// site, and then it is saved for next time. Returns { blob, saved }.
+async function getFile(url) {
+  let cache = null;
+  try { if (window.caches) cache = await caches.open(FILE_CACHE); } catch (error) { cache = null; }
+  if (cache) {
+    const saved = await cache.match(url);
+    if (saved) return { blob: await saved.blob(), saved: true };
+  }
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("HTTP " + response.status);
+  let saved = false;
+  if (cache) {
+    try { await cache.put(url, response.clone()); saved = true; } catch (error) { /* storage full */ }
+  }
+  return { blob: await response.blob(), saved: saved };
+}
+
+// Loads the PDF reader (PDF.js, in the lib folder) the first time it is needed
+let pdfLibrary = null;
+function loadPdfLibrary() {
+  if (!pdfLibrary) {
+    pdfLibrary = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "lib/pdf.min.js";
+      script.onload = () => {
+        pdfjsLib.GlobalWorkerOptions.workerSrc = "lib/pdf.worker.min.js";
+        resolve(pdfjsLib);
+      };
+      script.onerror = () => { pdfLibrary = null; reject(new Error("The PDF reader didn’t load.")); };
+      document.head.append(script);
+    });
+  }
+  return pdfLibrary;
+}
+
+async function showFile(file, backAddress, backLabel) {
+  const view = viewNumber;
+  document.title = file.label + " | Opely";
+  app.innerHTML = `
+    <a class="back" href="${backAddress}">${esc(backLabel)}</a>
+    <h1>${esc(file.label)}</h1>
+    <p id="fileStatus" class="secondary" role="status">${t("Downloading…")}</p>
+    <p class="file-actions"><a id="fileDownload" class="button" hidden>${t("Download")}</a></p>
+    <div id="pages" class="pages"></div>`;
+  const status = document.getElementById("fileStatus");
+
+  try {
+    // 1. Get the file and offer it as a download
+    const got = await getFile(file.url);
+    if (view !== viewNumber) return; // the student already moved to another page
+    fileUrl = URL.createObjectURL(got.blob);
+    const download = document.getElementById("fileDownload");
+    download.href = fileUrl;
+    download.download = /\.pdf$/i.test(file.label) ? file.label : file.label + ".pdf";
+    download.hidden = false;
+
+    // 2. Show its pages
+    status.textContent = t("Opening…");
+    const library = await loadPdfLibrary();
+    const pdf = await library.getDocument({ data: await got.blob.arrayBuffer() }).promise;
+    if (view !== viewNumber) return;
+    status.textContent = plural(pdf.numPages, "page") + (got.saved ? SEP + t("saved in this browser") : "");
+    await showPages(pdf, view);
+  } catch (error) {
+    if (view !== viewNumber) return;
+    status.textContent = fileUrl
+      ? t("Can’t show this file here. You can still download it.")
+      : t("Can’t get this file. Check your connection, then reload.");
+  }
+}
+
+// Makes an empty box for every page, and draws a page only when the student
+// scrolls near it. A long file would be slow and heavy if drawn all at once.
+async function showPages(pdf, view) {
+  const holder = document.getElementById("pages");
+  const size = (await pdf.getPage(1)).getViewport({ scale: 1 });
+  if (view !== viewNumber) return;
+
+  pageWatcher = new IntersectionObserver(entries => entries.forEach(entry => {
+    if (!entry.isIntersecting) return;
+    pageWatcher.unobserve(entry.target);
+    drawPage(pdf, entry.target, view);
+  }), { rootMargin: "800px 0px" });
+
+  for (let number = 1; number <= pdf.numPages; number += 1) {
+    const box = document.createElement("div");
+    box.className = "page";
+    box.dataset.page = number;
+    box.style.aspectRatio = size.width + " / " + size.height;
+    holder.append(box);
+    pageWatcher.observe(box);
+  }
+}
+
+async function drawPage(pdf, box, view) {
+  const page = await pdf.getPage(Number(box.dataset.page));
+  if (view !== viewNumber) return;
+  // Draw at the width of the box, a little sharper on high-resolution screens
+  const sharpness = Math.min(window.devicePixelRatio || 1, 2);
+  const natural = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: box.clientWidth / natural.width * sharpness });
+  const canvas = document.createElement("canvas");
+  canvas.dir = "ltr"; // a PDF page is drawn left to right, even on a right-to-left site
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  canvas.setAttribute("role", "img");
+  canvas.setAttribute("aria-label", t("Page {n}", { n: box.dataset.page }));
+  box.style.aspectRatio = natural.width + " / " + natural.height;
+  box.append(canvas);
+  await page.render({ canvasContext: canvas.getContext("2d"), viewport: viewport }).promise;
+}
+
+// ----- Shown while the content is loading, or if it can’t be loaded -----
+function showStatus(message) {
+  app.innerHTML = `<h1>Opely</h1><p class="lead secondary">${t(message)}</p>`;
+}
+
+function showLoading() {
+  showStatus(loadFailed ? "Can’t load the lectures. Check your connection, then reload." : "Loading…");
+}
+
+// ----- Settings: appearance, language, saved files, and the way to the admin page -----
+let lastPlace = "#home"; // where the student was before opening Settings
+
+async function showSettings() {
+  const view = viewNumber;
+  document.title = t("Settings") + " | Opely";
+  // A switch made of buttons. `choices` is a list of [value, words shown].
+  const choiceSwitch = (key, choices) => `
+    <div class="segments three setting" role="radiogroup" data-key="${key}">
+      ${choices.map(([value, words]) => `<button class="segment" type="button" role="radio" data-value="${value}"
+        aria-checked="${savedChoice(key) === value}" ${savedChoice(key) === value ? 'aria-current="true"' : ""}>${words}</button>`).join("")}
+    </div>`;
+
+  app.innerHTML = `
+    <a class="back" href="${lastPlace}">${t("Back")}</a>
+    <h1>${t("Settings")}</h1>
+
+    <h2>${t("Appearance")}</h2>
+    ${choiceSwitch(APPEARANCE_KEY, [["auto", t("Automatic")], ["light", t("Light")], ["dark", t("Dark")]])}
+
+    <h2>${t("Language")}</h2>
+    ${choiceSwitch(LANGUAGE_KEY, [["auto", t("Automatic")], ["en", "English"], ["ar", "العربية"]])}
+    <p class="hint small secondary">${t("Automatic follows your device.")}</p>
+
+    <h2>${t("Saved files")}</h2>
+    <ul class="group"><li><span class="row"><span id="savedSize" class="grow">${t("Loading…")}</span></span></li></ul>
+    <p class="hint small secondary">${t("PDFs you open are kept in this browser, so they open faster next time.")}</p>
+    <button id="clearFiles" class="danger" type="button" hidden>${t("Remove saved files")}</button>
+
+    <h2>${t("Admin")}</h2>
+    <ul class="group"><li><a class="row" href="admin.html"><span class="grow">${t("Admin page")}<br>
+      <span class="secondary small">${t("For people who manage a stage.")}</span></span></a></li></ul>
+
+    <h2>${t("About")}</h2>
+    <p class="text-block">${t("Opely is open source, under the MIT License.")}</p>`;
+
+  // Choosing in a switch: appearance changes at once, a new language reloads the page in that language
+  app.querySelectorAll(".setting button").forEach(button => button.addEventListener("click", () => {
+    const key = button.parentElement.dataset.key;
+    if (savedChoice(key) === button.dataset.value) return;
+    saveChoice(key, button.dataset.value);
+    if (key === LANGUAGE_KEY) return location.reload();
+    applyAppearance();
+    showSettings();
+  }));
+
+  // How much space the saved PDFs take
+  const sizeText = document.getElementById("savedSize");
+  const clear = document.getElementById("clearFiles");
+  if (!window.caches) { sizeText.textContent = t("Saving files isn’t available in this browser."); return; }
+  try {
+    const cache = await caches.open(FILE_CACHE);
+    const saved = await cache.keys();
+    let bytes = 0;
+    for (const request of saved) bytes += (await (await cache.match(request)).blob()).size;
+    if (view !== viewNumber) return; // the student already moved to another page
+    const big = bytes >= 1024 * 1024; // under 1 MB, the size is shown in KB
+    const size = (bytes / (big ? 1024 * 1024 : 1024)).toLocaleString(locale, { maximumFractionDigits: big ? 1 : 0 }) + (big ? " MB" : " KB");
+    sizeText.textContent = saved.length ? plural(saved.length, "file") + SEP + size : t("No saved files.");
+    clear.hidden = saved.length === 0;
+  } catch (error) {
+    sizeText.textContent = t("Saving files isn’t available in this browser.");
+  }
+
+  // Removing them needs two taps: the first changes the button's text, the second removes
+  clear.addEventListener("click", async () => {
+    if (!clear.dataset.armed) {
+      clear.dataset.armed = "yes";
+      clear.textContent = t("Tap again to remove");
+      setTimeout(() => {
+        if (!clear.isConnected || !clear.dataset.armed) return;
+        delete clear.dataset.armed;
+        clear.textContent = t("Remove saved files");
+      }, 4000);
+      return;
+    }
+    await caches.delete(FILE_CACHE);
+    showSettings();
+  });
+}
+
+function showNotFound() {
+  document.title = t("Page not found") + " | Opely";
+  app.innerHTML = `
+    <h1>${t("Page not found")}</h1>
+    <p class="text-block empty">${t("This department, stage, course, or lecture may have been renamed.")} <a href="#home">${t("See all departments")}</a></p>`;
+}
+
+// ----- Decides which page to draw, based on the part after # in the address -----
+// The parts are separated by hyphens: department, stage, course, lecture.
+// Examples: #cs   #cs-news   #cs-stage1   #cs-stage1-sem2   #cs-stage1-cs101
+//           #cs-stage1-cs101-sources   #cs-stage1-cs101-l1
+// One more part opens a PDF: #cs-stage1-cs101-l1-2 is the second file of
+// that lecture, and #cs-stage1-cs101-sources-1 is the course's first source.
+function route(keepScroll) {
+  const name = location.hash.replace("#", "");
+  if (!keepScroll) window.scrollTo(0, 0);
+
+  // Tidy up after a PDF that was being viewed
+  viewNumber += 1;
+  if (fileUrl) { URL.revokeObjectURL(fileUrl); fileUrl = null; }
+  if (pageWatcher) { pageWatcher.disconnect(); pageWatcher = null; }
+
+  // The settings button lights up on the Settings page
+  document.querySelector(".icon-button").toggleAttribute("aria-current", name === "settings");
+  if (name === "settings") return showSettings();
+  lastPlace = "#" + (name || "home");
+
+  if (catalogText === null) return showLoading();
+
+  if (name === "" || name === "home") return showDepartments();
+
+  const [deptId, stageId, courseId, lectureKey, fileNumber] = name.split("-");
+  const dept = departments.find(d => d.id === deptId);
+  if (!dept) return showNotFound();
+  if (!content[dept.id]) return showLoading();
+  const stages = content[dept.id].stages;
+  if (stageId === undefined) return showDepartment(dept, stages);
+  if (stageId === "news") return showNews(dept, stages);
+
+  const stage = stages.find(s => s.id === stageId);
+  if (!stage) return showNotFound();
+  if (courseId === undefined || courseId === "sem1") return showStage(dept, stage, 1);
+  if (courseId === "sem2") return showStage(dept, stage, 2);
+
+  const course = stage.courses.find(s => s.id === courseId);
+  if (!course) return showNotFound();
+  if (lectureKey === undefined) return showCourse(dept, stage, course, "lectures");
+  const base = "#" + dept.id + "-" + stage.id + "-" + course.id;
+  if (lectureKey === "sources") {
+    if (fileNumber === undefined) return showCourse(dept, stage, course, "sources");
+    const source = (course.sources || [])[Number(fileNumber) - 1];
+    if (!source || !isPdf(source.url)) return showNotFound();
+    return showFile(source, base + "-sources", course.title);
+  }
+
+  // A lecture is found by its id. A plain number (an older link) still works.
+  let index = course.lectures.findIndex(lecture => lecture.id === lectureKey);
+  if (index === -1) index = Number(lectureKey) - 1;
+  const lecture = course.lectures[index];
+  if (!lecture) return showNotFound();
+  if (fileNumber === undefined) return showLecture(dept, stage, course, index + 1);
+
+  const file = (lecture.files || [])[Number(fileNumber) - 1];
+  if (!file || !isPdf(file.url)) return showNotFound();
+  showFile(file, base + "-" + lectureKey, lecture.title);
+}
+
+// ----- Loading the content -----
+// Turns the text of catalog.json into the lists this page uses
+function useCatalog(text) {
+  const catalog = JSON.parse(text);
+  const newFaculties = [];
+  const newDepartments = [];
+  (catalog.universities || []).forEach(university =>
+    (university.faculties || []).forEach(faculty => {
+      const list = faculty.departments || [];
+      newFaculties.push({ name: localName(faculty), university: university, departments: list });
+      list.forEach(dept => newDepartments.push(dept));
+    }));
+  faculties = newFaculties;
+  departments = newDepartments;
+  catalogText = text;
+}
+
+function useDepartment(id, text) {
+  const parsed = JSON.parse(text);
+  content[id] = { text: text, stages: parsed.stages || [], announcements: parsed.announcements || [] };
+}
+
+// The department named in the address, if any
+function currentDepartment() {
+  const id = location.hash.replace("#", "").split("-")[0];
+  return departments.find(dept => dept.id === id);
+}
+
+// The copy of a file saved in this browser, or null
+function savedCopy(path) {
+  try { return localStorage.getItem(CACHE_PREFIX + path); } catch (error) { return null; }
+}
+
+// Shows the saved copy of the current department, if it isn’t open yet.
+// Returns true if the department still has to be fetched from the site.
+function openSavedDepartment() {
+  const dept = currentDepartment();
+  if (!dept || content[dept.id]) return false;
+  try {
+    const text = savedCopy(dept.data);
+    if (text) useDepartment(dept.id, text);
+  } catch (error) { /* a broken saved copy is ignored */ }
+  return true;
+}
+
+// Asks the site for the newest copy of one file. When nothing has changed,
+// the server only answers “not modified”, which costs it almost nothing.
+// Returns true if the file was new.
+async function refreshFile(path, shownText, use) {
+  const response = await fetch(path, { cache: "no-cache" });
+  if (!response.ok) throw new Error("HTTP " + response.status);
+  const text = await response.text();
+  if (text === shownText) return false;
+  use(text);
+  try { localStorage.setItem(CACHE_PREFIX + path, text); } catch (error) { /* storage full or blocked */ }
+  return true;
+}
+
+// Refreshes the catalog and the department being viewed, then redraws if anything changed
+async function refresh() {
+  try {
+    let changed = await refreshFile("catalog.json", catalogText, useCatalog);
+    const dept = currentDepartment();
+    if (dept) {
+      const shown = content[dept.id] ? content[dept.id].text : null;
+      if (await refreshFile(dept.data, shown, text => useDepartment(dept.id, text))) changed = true;
+    }
+    loadFailed = false;
+    if (changed) route(true);
+  } catch (error) {
+    // Only show the error if there is nothing saved to show instead
+    const dept = currentDepartment();
+    if (catalogText === null || (dept && !content[dept.id])) { loadFailed = true; route(true); }
+  }
+}
+
+window.addEventListener("hashchange", () => {
+  loadFailed = false;
+  const needsFetch = openSavedDepartment(); // the student opened a department for the first time
+  route();
+  if (needsFetch) refresh();
+});
+// Check again whenever the student comes back to the tab
+document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(); });
+
+// Start: show the copies saved in this browser, then ask the site for the newest
+try {
+  const text = savedCopy("catalog.json");
+  if (text) useCatalog(text);
+} catch (error) { /* a broken saved copy is ignored */ }
+openSavedDepartment();
+route();
+refresh();
+</script>
+</body>
+</html>
