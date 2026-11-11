@@ -47,6 +47,7 @@ const TRANSLATIONS = {
     "Latest": "الأحدث",
     "No departments yet.": "لا توجد أقسام بعد.",
     "Departments": "الأقسام",
+    "Lectures, slides, and announcements for your department.": "محاضرات وشرائح وإعلانات لقسمك.",
     "Choose your department.": "اختر قسمك.",
     "{n} more": "إعلانات أخرى: {n}",
     "All stages": "كل المراحل",
@@ -265,7 +266,7 @@ function applyAppearance() {
   // The colour of the phone's status bar follows the same choice
   document.querySelectorAll('meta[name="theme-color"]').forEach(meta => {
     if (!meta.dataset.auto) meta.dataset.auto = meta.content; // remember the device-following colour
-    meta.content = choice === "auto" ? meta.dataset.auto : choice === "dark" ? "#000000" : "#F2F2F7";
+    meta.content = choice === "auto" ? meta.dataset.auto : choice === "dark" ? "#141210" : "#F7F5F1";
   });
 }
 applyAppearance();

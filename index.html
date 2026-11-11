@@ -5,10 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="Lectures, slides, and announcements for every department and stage.">
 <title>Opely</title>
-<meta name="theme-color" content="#F2F2F7" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#F7F5F1" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#141210" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-180.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,600&family=Noto+Sans+Arabic:wght@400;600;700&family=Noto+Naskh+Arabic:wght@600&display=swap">
 <link rel="stylesheet" href="style.css">
 <script src="lang.js"></script>
 </head>
@@ -132,16 +135,19 @@ function showDepartments() {
   const manyUniversities = new Set(faculties.map(faculty => faculty.university.id)).size > 1;
   const sections = faculties.map(faculty => {
     const heading = manyUniversities ? localName(faculty.university) + SEP + faculty.name : faculty.name;
-    const widgets = faculty.departments.map(dept => `
-      <a class="widget dept filled ${esc(dept.color)}" href="#${dept.id}">
-        <span class="glyph">${esc(dept.short || dept.name.charAt(0))}</span>
+    const rows = faculty.departments.map(dept => `
+      <li><a class="dept-row ${esc(dept.color)}" href="#${dept.id}">
+        <span class="dept-mark">${esc(dept.short || dept.name.charAt(0))}</span>
         <span class="title">${esc(localName(dept))}</span>
-      </a>`).join("");
-    return `<h2>${esc(heading)}</h2><div class="widgets depts">${widgets}</div>`;
+      </a></li>`).join("");
+    return `<h2>${esc(heading)}</h2><ul class="dept-list">${rows}</ul>`;
   }).join("");
 
   app.innerHTML = `
-    <h1>${t("Departments")}</h1>
+    <div class="brand-block">
+      <span class="brand">Opely</span>
+      <p class="brand-tag">${t("Lectures, slides, and announcements for your department.")}</p>
+    </div>
     <p class="lead secondary">${t("Choose your department.")}</p>
     ${sections}`;
 }
@@ -439,7 +445,11 @@ async function drawPage(pdf, box, view) {
 
 // ----- Shown while the content is loading, or if it can’t be loaded -----
 function showStatus(message) {
-  app.innerHTML = `<h1>Opely</h1><p class="lead secondary">${t(message)}</p>`;
+  app.innerHTML = `
+    <div class="brand-block">
+      <span class="brand">Opely</span>
+      <p class="brand-tag">${t(message)}</p>
+    </div>`;
 }
 
 function showLoading() {
